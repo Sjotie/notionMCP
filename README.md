@@ -32,7 +32,7 @@ This tool acts as a bridge between AI assistants (like Claude) and your Notion w
 ### 2. Setting Up This Server
 
 1. Download this repository to your computer
-   - If you have Git: `git clone [repository-url]`
+   - If you have Git: `git clone https://github.com/Sjotie/notionMCP/`
    - Or download and extract the ZIP file
 
 2. Open a command prompt or terminal
@@ -48,12 +48,6 @@ This tool acts as a bridge between AI assistants (like Claude) and your Notion w
    ```
    npm install
    ```
-
-5. Create a configuration file:
-   - Make a copy of `.env.example` and name it `.env`
-   - Open the `.env` file in a text editor
-   - Replace `your_notion_api_key_here` with the token you copied earlier
-   - Save the file
 
 ### 3. Connecting to Notion Pages
 
