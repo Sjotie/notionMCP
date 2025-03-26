@@ -29,25 +29,67 @@ This tool acts as a bridge between AI assistants (like Claude) and your Notion w
 5. On the next page, find the **"Internal Integration Token"** section
 6. Click **"Show"** and copy the token (it starts with `secret_`)
 
-### 2. Setting Up This Server
+## 2. Setting Up This Server
 
-1. Download this repository to your computer
-   - If you have Git: `git clone https://github.com/Sjotie/notionMCP/`
-   - Or download and extract the ZIP file
+### Download the Repository
 
-2. Open a command prompt or terminal
+**Option A: Download as ZIP (Recommended for beginners)**
+1. Go to the GitHub repository: https://github.com/Sjotie/notionMCP/
+2. Click the green "Code" button at the top right
+3. Select "Download ZIP"
+4. Once downloaded, extract the ZIP file to a location on your computer
+   - Windows: Right-click the ZIP file and select "Extract All"
+   - Mac: Double-click the ZIP file to extract
+
+**Option B: Clone with Git (For users familiar with Git)**
+1. Open a command prompt or terminal
    - Windows: Press `Win+R`, type `cmd`, and press Enter
    - Mac: Open Terminal from Applications > Utilities
+2. Navigate to where you want to store the repository
+   ```
+   cd path/to/desired/location
+   ```
+3. Clone the repository
+   ```
+   git clone https://github.com/Sjotie/notionMCP/
+   ```
 
-3. Navigate to the folder where you downloaded this repository:
+### Navigate to the Project Directory
+
+After downloading or cloning, you need to navigate to the project folder using the `cd` (change directory) command:
+
+**If you downloaded the ZIP (Option A):**
+1. Open a command prompt or terminal
+2. Use the `cd` command to navigate to where you extracted the ZIP file:
    ```
-   cd path/to/notion-mcp-server
+   cd path/to/extracted/folder/notionMCP
+   ```
+   
+   For example:
+   - On Windows: `cd C:\Users\YourName\Downloads\notionMCP`
+   - On Mac: `cd /Users/YourName/Downloads/notionMCP`
+
+**If you cloned with Git (Option B):**
+1. The repository should have been cloned into a folder named "notionMCP"
+2. If you're still in the same terminal window after cloning, simply type:
+   ```
+   cd notionMCP
    ```
 
-4. Install the required dependencies:
-   ```
-   npm install
-   ```
+**How to know you're in the right directory:**
+- After using the `cd` command, you can check your current location:
+  - On Windows: Type `dir` and press Enter - you should see files like `server.js`
+  - On Mac: Type `ls` and press Enter - you should see files like `server.js`
+
+### Install Dependencies
+
+Once you're in the notionMCP directory, install the required dependencies:
+
+```
+npm install
+```
+
+This will install all the necessary Node.js packages. You should see a progress bar and eventually a message indicating the installation is finished. It might say something along the lines of "X Packages are looking for funding" - this is completely normal and means it worked.
 
 ### 3. Connecting to Notion Pages
 
@@ -123,7 +165,7 @@ The server provides these tools to AI assistants:
 1. **"Connection failed" in Claude**
    - Make sure the server path in claude_desktop_config.json is correct
    - Check that your Notion API key is valid
-   - Ensure Node.js is installed correctly
+   - Ensure Node.js is installed
 
 2. **"Access denied" when accessing Notion content**
    - Make sure you've shared the page/database with your integration
