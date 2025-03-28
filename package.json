@@ -1,6 +1,6 @@
 {
   "name": "@sjotie/notion-mcp-server",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "MCP server for Notion integration",
   "type": "module",
   "main": "server.js",
@@ -15,6 +15,9 @@
   ],
   "author": "Sjotie",
   "license": "MIT",
+  "bin": {
+      "notion-mcp-server": "./server.js"
+    },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^0.7.0",
     "@notionhq/client": "^2.2.16",
