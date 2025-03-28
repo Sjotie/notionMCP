@@ -1,5 +1,5 @@
 {
-  "name": "@Sjotie/notion-mcp-server",
+  "name": "@sjotie/notion-mcp-server",
   "version": "1.0.0",
   "description": "MCP server for Notion integration",
   "type": "module",
