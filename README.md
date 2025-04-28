@@ -1,3 +1,5 @@
+[![MseeP Badge](https://mseep.net/pr/sjotie-notionmcp-badge.jpg)](https://mseep.ai/app/sjotie-notionmcp)
+
 # Notion MCP Server
 
 A Model Context Protocol (MCP) server that connects Claude and other AI assistants to your Notion workspace. This integration allows AI assistants to interact with your Notion databases, pages, and blocks.
