@@ -671,15 +671,14 @@ app.use(express.json());
 
 let transportInstance = null;          // holds current SSE connection
 
-// 1  Client opens an SSE stream here
+// Handle both GET and POST on /sse endpoint
 app.get("/sse", (req, res) => {
-  transportInstance = new SSEServerTransport("/messages", res);
+  transportInstance = new SSEServerTransport("/sse", res);
   server.connect(transportInstance)
         .catch(err => console.error("MCP handshake error:", err));
 });
 
-// 2  Client sends JSON-RPC requests here
-app.post("/messages", (req, res) => {
+app.post("/sse", (req, res) => {
   if (!transportInstance) {
     res.status(400).json({ error: "SSE channel not established yet" });
     return;
