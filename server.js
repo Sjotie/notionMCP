@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import express from "express";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { z } from "zod";
 import { Client } from "@notionhq/client";
 import dotenv from "dotenv";
@@ -664,19 +665,30 @@ server.setRequestHandler(z.object({
   }
 });
 
-// Start the server
-async function main() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  console.error("Notion MCP Server running on stdio");
-}
+// Remote transport (SSE over HTTP) 
+const app = express();
+app.use(express.json());
 
-// Add error handling for unhandled rejections
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+let transportInstance = null;          // holds current SSE connection
+
+// 1  Client opens an SSE stream here
+app.get("/sse", (req, res) => {
+  transportInstance = new SSEServerTransport("/messages", res);
+  server.connect(transportInstance)
+        .catch(err => console.error("MCP handshake error:", err));
 });
 
-main().catch((error) => {
-  console.error("Fatal error in main():", error);
-  process.exit(1);
+// 2  Client sends JSON-RPC requests here
+app.post("/messages", (req, res) => {
+  if (!transportInstance) {
+    res.status(400).json({ error: "SSE channel not established yet" });
+    return;
+  }
+  transportInstance.handlePostMessage(req, res);
+});
+
+// Railway provides PORT; default to 8787 for local dev
+const PORT = process.env.PORT || 8787;
+app.listen(PORT, "0.0.0.0", () => {
+  console.error(`Notion MCP Server listening on http://0.0.0.0:${PORT}`);
 });
