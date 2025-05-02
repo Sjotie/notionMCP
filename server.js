@@ -678,12 +678,16 @@ app.get("/sse", (req, res) => {
         .catch(err => console.error("MCP handshake error:", err));
 });
 
-app.post("/sse", (req, res) => {
-  if (!transportInstance) {
-    res.status(400).json({ error: "SSE channel not established yet" });
-    return;
+app.post("/sse", async (req, res) => {
+  // Create a dummy response for POST compatibility if none exists
+  if (!transportInstance || !transportInstance.isOpen()) {
+    transportInstance = new SSEServerTransport("/sse");
+    await server.connect(transportInstance).catch((err) => {
+      console.error("MCP handshake error (POST):", err);
+    });
   }
-  transportInstance.handlePostMessage(req, res);
+
+  await transportInstance.handlePostMessage(req, res);
 });
 
 // Railway provides PORT; default to 8787 for local dev
