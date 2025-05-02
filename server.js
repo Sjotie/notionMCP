@@ -667,7 +667,6 @@ server.setRequestHandler(z.object({
 
 // Remote transport (SSE over HTTP) 
 const app = express();
-app.use(express.json());
 
 let transportInstance = null;          // holds current SSE connection
 
