@@ -671,23 +671,21 @@ app.use(express.json());
 
 let transportInstance = null;          // holds current SSE connection
 
-// Handle both GET and POST on /sse endpoint
+// 1) Open the SSE stream (GET endpoint)
 app.get("/sse", (req, res) => {
-  transportInstance = new SSEServerTransport("/sse", res);
+  transportInstance = new SSEServerTransport("/messages", res);
   server.connect(transportInstance)
         .catch(err => console.error("MCP handshake error:", err));
 });
 
-app.post("/sse", async (req, res) => {
-  // Create a dummy response for POST compatibility if none exists
-  if (!transportInstance || !transportInstance.isOpen()) {
-    transportInstance = new SSEServerTransport("/sse");
-    await server.connect(transportInstance).catch((err) => {
-      console.error("MCP handshake error (POST):", err);
-    });
+// 2) Handle JSON-RPC messages (POST endpoint)
+app.post("/messages", (req, res) => {
+  if (!transportInstance) {
+    console.error("POST /messages received before SSE connection established");
+    res.status(400).json({ error: "SSE connection not initialized" });
+    return;
   }
-
-  await transportInstance.handlePostMessage(req, res);
+  transportInstance.handlePostMessage(req, res);
 });
 
 // Railway provides PORT; default to 8787 for local dev
