@@ -682,7 +682,10 @@ app.get("/sse", (req, res) => {
 app.post("/messages", (req, res) => {
   if (!transportInstance) {
     console.error("POST /messages received before SSE connection established");
-    res.status(400).json({ error: "SSE connection not initialized" });
+    res.status(400).json({ 
+      error: "SSE connection not initialized",
+      solution: "First establish SSE connection by calling GET /sse endpoint"
+    });
     return;
   }
   transportInstance.handlePostMessage(req, res);
