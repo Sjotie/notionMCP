@@ -16,12 +16,14 @@ dotenv.config();
 const activeSessions = new Map(); // Map<sessionId, SessionData>
 // --------------------------
 
-// Create MCP server instance
+ // Create MCP server instance
 const mcpServer = new McpSDKServer({
   name: "notion-mcp-multiuser",
   version: "1.1.0",
 }, {
-  capabilities: {},
+  capabilities: {
+    tools: true // Indicate that the server supports tools
+  },
 });
 
 mcpServer.setRequestHandler(z.object({
