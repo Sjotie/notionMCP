@@ -670,28 +670,40 @@ const app = express();
 
 let transportInstance = null;          // holds current SSE connection
 
+/**
+ * Unified MCP endpoint for both SSE (GET) and message POSTs.
+ */
+
 // 1) Open the SSE stream (GET endpoint)
-app.get("/sse", (req, res) => {
-  transportInstance = new SSEServerTransport("/messages", res);
+app.get("/mcp", (req, res) => {
+  // Optionally close previous transport if a new GET /mcp comes in
+  if (transportInstance && typeof transportInstance.close === 'function') {
+    console.error("New GET /mcp request received, closing existing SSE transport.");
+    transportInstance.close();
+  }
+  transportInstance = new SSEServerTransport("/mcp", res);
   server.connect(transportInstance)
         .catch(err => console.error("MCP handshake error:", err));
 });
 
 // 2) Handle JSON-RPC messages (POST endpoint)
-app.post("/messages", (req, res) => {
+app.post("/mcp", (req, res) => {
   if (!transportInstance) {
-    console.error("POST /messages received before SSE connection established");
+    console.error("POST /mcp received before SSE connection established on GET /mcp");
     res.status(400).json({ 
       error: "SSE connection not initialized",
-      solution: "First establish SSE connection by calling GET /sse endpoint"
+      solution: "First establish SSE connection by calling GET /mcp endpoint"
     });
     return;
   }
   transportInstance.handlePostMessage(req, res);
 });
 
-// Railway provides PORT; default to 8787 for local dev
+/**
+ * Listen on 0.0.0.0 for external access (e.g. Railway, Docker).
+ * For local-only, use 127.0.0.1.
+ */
 const PORT = process.env.PORT || 8787;
-app.listen(PORT, "127.0.0.1", () => {
-  console.error(`Notion MCP Server listening on http://127.0.0.1:${PORT}`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.error(`Notion MCP Server listening on http://0.0.0.0:${PORT}`);
 });
