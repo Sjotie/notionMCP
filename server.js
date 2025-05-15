@@ -29,9 +29,22 @@ const mcpServer = new McpSDKServer({
 mcpServer.setRequestHandler(z.object({
   method: z.string(),
   params: z.any().optional()
-}), async (request, executionContext) => {
-  const sessionId = executionContext?.transport?._customSessionId || "unknown_session";
-  console.error(`[${sessionId}] Received raw MCP request:`, JSON.stringify(request.method, null, 2));
+}), async (jsonRpcRequest, executionContext) => {
+  // Try to get sessionId from several possible locations
+  let sessionIdForLog = jsonRpcRequest._expressSessionId ||
+                        executionContext?.req?._expressSessionId ||
+                        executionContext?.transport?._customSessionId ||
+                        "unknown_session";
+  console.error(`[${sessionIdForLog}] Received raw MCP request method:`, jsonRpcRequest.method);
+  // Uncomment for deep debugging:
+  // console.error(`[${sessionIdForLog}] Full JSON-RPC Request:`, JSON.stringify(jsonRpcRequest, null, 2));
+  // console.error(`[${sessionIdForLog}] Full ExecutionContext:`, executionContext);
+  if (jsonRpcRequest._expressSessionId) {
+    console.error(`[${sessionIdForLog}] Found _expressSessionId directly on JSON-RPC request object!`);
+  }
+  if (executionContext?.req?._expressSessionId) {
+    console.error(`[${sessionIdForLog}] Found _expressSessionId on executionContext.req!`);
+  }
   return undefined;
 }, { priority: -1 });
 
@@ -45,29 +58,30 @@ mcpServer.setRequestHandler(
       }).passthrough().optional(),
     }).passthrough(),
   }),
-  async (request, executionContext) => {
-    const transport = executionContext?.transport;
-    const sessionId = transport?._customSessionId;
+  async (jsonRpcRequest, executionContext) => {
+    let sessionId = jsonRpcRequest._expressSessionId ||
+                    executionContext?.req?._expressSessionId ||
+                    executionContext?.transport?._customSessionId;
     console.error(`[${sessionId || 'initialize'}] MCP 'initialize' handler invoked.`);
 
-    if (!transport || !sessionId) {
-      console.error(`[initialize] CRITICAL: Could not identify client session/transport from executionContext. API key cannot be stored.`);
+    if (!sessionId) {
+      console.error(`[initialize] CRITICAL: Could not determine sessionId. API key cannot be stored reliably.`);
       return { capabilities: mcpServer.capabilities };
     }
 
-    const clientProvidedApiKey = request.params?.initializationOptions?.notionApiKey;
     const sessionData = activeSessions.get(sessionId);
 
     if (sessionData) {
+      const clientProvidedApiKey = jsonRpcRequest.params?.initializationOptions?.notionApiKey;
       if (clientProvidedApiKey) {
         sessionData.notionApiKey = clientProvidedApiKey;
-        activeSessions.set(sessionId, sessionData);
+        // No need to set again, it's a reference
         console.error(`[${sessionId}] User-specific Notion API Key stored via initialize.`);
       } else {
-        console.error(`[${sessionId}] No Notion API Key found in initializationOptions. Session will use server default if tool is called.`);
+        console.error(`[${sessionId}] No Notion API Key found in initializationOptions.`);
       }
     } else {
-      console.error(`[${sessionId}] WARNING: Session data not found for transport during initialize. This shouldn't happen.`);
+      console.error(`[${sessionId}] WARNING: Session data not found in activeSessions map during initialize.`);
     }
     return { capabilities: mcpServer.capabilities };
   },
@@ -77,9 +91,11 @@ mcpServer.setRequestHandler(
 // --- 'tools/list' Handler (Tool schemas are clean) ---
 mcpServer.setRequestHandler(z.object({
   method: z.literal("tools/list")
-}), async (request, executionContext) => {
-  const sessionId = executionContext?.transport?._customSessionId || "tools/list";
-  console.error(`[${sessionId}] MCP 'tools/list' handler invoked.`);
+}), async (jsonRpcRequest, executionContext) => {
+  let sessionId = jsonRpcRequest._expressSessionId ||
+                  executionContext?.req?._expressSessionId ||
+                  executionContext?.transport?._customSessionId;
+  console.error(`[${sessionId || 'tools/list'}] MCP 'tools/list' handler invoked.`);
   // Return the same tools for everyone; access control is per-call via API key
   return {
     tools: [
@@ -94,20 +110,26 @@ mcpServer.setRequestHandler(z.object({
 mcpServer.setRequestHandler(z.object({
   method: z.literal("tools/call"),
   params: z.object({ name: z.string(), arguments: z.any().optional() })
-}), async (request, executionContext) => {
-  const { name, arguments: args } = request.params;
-  const transport = executionContext?.transport;
-  const sessionId = transport?._customSessionId;
+}), async (jsonRpcRequest, executionContext) => {
+  const { name, arguments: args } = jsonRpcRequest.params;
+  let sessionId = jsonRpcRequest._expressSessionId ||
+                  executionContext?.req?._expressSessionId ||
+                  executionContext?.transport?._customSessionId;
 
   console.error(`[${sessionId || 'tools/call'}] MCP 'tools/call' for tool: ${name}`);
 
-  if (!transport || !sessionId) {
-    console.error(`[${name}] CRITICAL: Could not identify client session/transport. Cannot proceed.`);
-    return { isError: true, content: [{ type: "text", text: "Internal Server Error: Could not identify client session." }] };
+  if (!sessionId) {
+    console.error(`[${name}] CRITICAL: Could not determine sessionId for tools/call. Cannot proceed.`);
+    return { isError: true, content: [{ type: "text", text: "Internal Server Error: Could not identify client session for tool call." }] };
   }
 
   const sessionData = activeSessions.get(sessionId);
-  let userApiKey = sessionData?.notionApiKey;
+  if (!sessionData) {
+      console.error(`[${sessionId}] CRITICAL: Session data not found in activeSessions for tools/call.`);
+      return { isError: true, content: [{ type: "text", text: "Internal Server Error: Session data missing." }] };
+  }
+
+  let userApiKey = sessionData.notionApiKey;
   let effectiveApiKey = userApiKey;
 
   if (!effectiveApiKey) {
@@ -301,6 +323,8 @@ app.post("/mcp", (req, res) => {
   const session = activeSessions.get(sessionId);
   if (session && session.transport) {
     console.error(`[${sessionId}] POST /mcp: Routing message to transport.`);
+    // Attach sessionId to the Express request object for downstream access
+    req._expressSessionId = sessionId;
     session.transport.handlePostMessage(req, res);
   } else {
     console.error(`[${sessionId || 'unknown'}] POST /mcp: No active session/transport found for session ID.`);
