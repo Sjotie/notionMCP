@@ -2,6 +2,7 @@ import requests
 import json
 import time
 import uuid # For dummy API keys
+import os
 
 # --- Configuration ---
 BASE_URL = "http://127.0.0.1:8080"
@@ -107,13 +108,16 @@ def run_tests():
                             # WHILE THE SSE CONNECTION (sse_response) IS STILL OPEN
                             
                             # 2. Send 'initialize' request
-                            dummy_user_api_key = f"dummy_notion_key_{uuid.uuid4()}"
-                            print(f"Using dummy API key for initialize: {dummy_user_api_key}")
+                            notion_api_key = os.environ.get("NOTION_API_KEY")
+                            if not notion_api_key:
+                                print("ERROR: NOTION_API_KEY not set in environment. Please set it in your .env or environment variables.")
+                                return
+                            print(f"Using NOTION_API_KEY from environment for initialize: {notion_api_key[:6]}...{notion_api_key[-4:]}")
                             initialize_params = {
                                 "protocolVersion": "2024-11-05",
                                 "clientInfo": {"name": "python-test-client", "version": "0.1.0"},
                                 "capabilities": {},
-                                "initializationOptions": {"notionApiKey": dummy_user_api_key}
+                                "initializationOptions": {"notionApiKey": notion_api_key}
                             }
                             init_response = send_mcp_post_request(session_id_from_sse, "initialize", initialize_params)
                             # Accept either a normal result or our synthetic 202-acknowledged response
