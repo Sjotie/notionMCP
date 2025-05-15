@@ -7,9 +7,12 @@ import { z } from "zod";
 import { Client as NotionClient } from "@notionhq/client";
 import dotenv from "dotenv";
 import { v4 as uuidv4 } from "uuid";
+import { AsyncLocalStorage } from "async_hooks";
 
 // Load environment variables
 dotenv.config();
+
+const als = new AsyncLocalStorage();
 
 // --- Session Management ---
 // Stores { transport: SSEServerTransport, notionApiKey: string | null }
@@ -29,22 +32,12 @@ const mcpServer = new McpSDKServer({
 mcpServer.setRequestHandler(z.object({
   method: z.string(),
   params: z.any().optional()
-}), async (jsonRpcRequest, executionContext) => {
-  // Try to get sessionId from several possible locations
-  let sessionIdForLog = jsonRpcRequest._expressSessionId ||
-                        executionContext?.req?._expressSessionId ||
-                        executionContext?.transport?._customSessionId ||
-                        "unknown_session";
+}), async (jsonRpcRequest) => {
+  const store = als.getStore();
+  const sessionIdForLog = store?.currentSessionId || "unknown_session";
   console.error(`[${sessionIdForLog}] Received raw MCP request method:`, jsonRpcRequest.method);
   // Uncomment for deep debugging:
   // console.error(`[${sessionIdForLog}] Full JSON-RPC Request:`, JSON.stringify(jsonRpcRequest, null, 2));
-  // console.error(`[${sessionIdForLog}] Full ExecutionContext:`, executionContext);
-  if (jsonRpcRequest._expressSessionId) {
-    console.error(`[${sessionIdForLog}] Found _expressSessionId directly on JSON-RPC request object!`);
-  }
-  if (executionContext?.req?._expressSessionId) {
-    console.error(`[${sessionIdForLog}] Found _expressSessionId on executionContext.req!`);
-  }
   return undefined;
 }, { priority: -1 });
 
@@ -58,14 +51,13 @@ mcpServer.setRequestHandler(
       }).passthrough().optional(),
     }).passthrough(),
   }),
-  async (jsonRpcRequest, executionContext) => {
-    let sessionId = jsonRpcRequest._expressSessionId ||
-                    executionContext?.req?._expressSessionId ||
-                    executionContext?.transport?._customSessionId;
-    console.error(`[${sessionId || 'initialize'}] MCP 'initialize' handler invoked.`);
+  async (jsonRpcRequest) => {
+    const store = als.getStore();
+    const sessionId = store?.currentSessionId;
+    console.error(`[${sessionId || 'initialize'}] MCP 'initialize' handler invoked (ALS).`);
 
     if (!sessionId) {
-      console.error(`[initialize] CRITICAL: Could not determine sessionId. API key cannot be stored reliably.`);
+      console.error(`[initialize] CRITICAL: Could not get sessionId from AsyncLocalStorage. API key cannot be stored.`);
       return { capabilities: mcpServer.capabilities };
     }
 
@@ -91,11 +83,10 @@ mcpServer.setRequestHandler(
 // --- 'tools/list' Handler (Tool schemas are clean) ---
 mcpServer.setRequestHandler(z.object({
   method: z.literal("tools/list")
-}), async (jsonRpcRequest, executionContext) => {
-  let sessionId = jsonRpcRequest._expressSessionId ||
-                  executionContext?.req?._expressSessionId ||
-                  executionContext?.transport?._customSessionId;
-  console.error(`[${sessionId || 'tools/list'}] MCP 'tools/list' handler invoked.`);
+}), async (jsonRpcRequest) => {
+  const store = als.getStore();
+  const sessionId = store?.currentSessionId;
+  console.error(`[${sessionId || 'tools/list'}] MCP 'tools/list' handler invoked (ALS).`);
   // Return the same tools for everyone; access control is per-call via API key
   return {
     tools: [
@@ -110,17 +101,16 @@ mcpServer.setRequestHandler(z.object({
 mcpServer.setRequestHandler(z.object({
   method: z.literal("tools/call"),
   params: z.object({ name: z.string(), arguments: z.any().optional() })
-}), async (jsonRpcRequest, executionContext) => {
+}), async (jsonRpcRequest) => {
   const { name, arguments: args } = jsonRpcRequest.params;
-  let sessionId = jsonRpcRequest._expressSessionId ||
-                  executionContext?.req?._expressSessionId ||
-                  executionContext?.transport?._customSessionId;
+  const store = als.getStore();
+  const sessionId = store?.currentSessionId;
 
-  console.error(`[${sessionId || 'tools/call'}] MCP 'tools/call' for tool: ${name}`);
+  console.error(`[${sessionId || 'tools/call'}] MCP 'tools/call' for tool: ${name} (ALS).`);
 
   if (!sessionId) {
-    console.error(`[${name}] CRITICAL: Could not determine sessionId for tools/call. Cannot proceed.`);
-    return { isError: true, content: [{ type: "text", text: "Internal Server Error: Could not identify client session for tool call." }] };
+    console.error(`[${name}] CRITICAL: Could not get sessionId from AsyncLocalStorage for tools/call.`);
+    return { isError: true, content: [{ type: "text", text: "Internal Server Error: Session context lost." }] };
   }
 
   const sessionData = activeSessions.get(sessionId);
@@ -322,10 +312,19 @@ app.post("/mcp", (req, res) => {
   }
   const session = activeSessions.get(sessionId);
   if (session && session.transport) {
-    console.error(`[${sessionId}] POST /mcp: Routing message to transport.`);
-    // Attach sessionId to the Express request object for downstream access
-    req._expressSessionId = sessionId;
-    session.transport.handlePostMessage(req, res);
+    console.error(`[${sessionId}] POST /mcp: Routing message to transport. Setting ALS context.`);
+    als.run({ currentSessionId: sessionId, currentTransport: session.transport }, () => {
+      try {
+        session.transport.handlePostMessage(req, res);
+      } catch (e) {
+        console.error(`[${sessionId}] Error during handlePostMessage or subsequent processing:`, e);
+        if (!res.headersSent) {
+          res.status(500).json({ error: "Internal server error processing message."});
+        } else if (!res.writableEnded) {
+          res.end(); // Try to close if possible
+        }
+      }
+    });
   } else {
     console.error(`[${sessionId || 'unknown'}] POST /mcp: No active session/transport found for session ID.`);
     res.status(404).json({ error: "Session not found or transport unavailable. Re-establish SSE connection." });
