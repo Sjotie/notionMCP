@@ -21,7 +21,7 @@ def send_mcp_post_request(session_id, method, params=None):
         return None
 
     headers = {
-        "Content-Type": "application/json-rpc",
+        "Content-Type": "application/json",
         "X-MCP-Session-ID": session_id
     }
     payload_dict = {
