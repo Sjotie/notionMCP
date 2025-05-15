@@ -4,6 +4,9 @@ import time
 import uuid # For dummy API keys
 import os
 
+from dotenv import load_dotenv
+load_dotenv()
+
 # --- Configuration ---
 BASE_URL = "http://127.0.0.1:8080"
 MCP_ENDPOINT = f"{BASE_URL}/mcp"
