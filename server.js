@@ -237,34 +237,55 @@ app.get("/mcp", (req, res) => {
   const sessionId = uuidv4();
   console.error(`[${sessionId}] GET /mcp: New client connection. Assigning sessionId.`);
 
+  // SSEServerTransport will set the necessary SSE headers on 'res' when it starts.
   const clientTransport = new SSEServerTransport("/mcp", res);
   clientTransport._customSessionId = sessionId;
 
   activeSessions.set(sessionId, { transport: clientTransport, notionApiKey: null });
   console.error(`[${sessionId}] Session created. Total active: ${activeSessions.size}`);
 
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.flushHeaders();
-  res.write(`event: mcp-session-id\ndata: ${JSON.stringify({ sessionId })}\n\n`);
-  console.error(`[${sessionId}] Sent mcp-session-id event to client.`);
-
   res.on('close', () => {
     console.error(`[${sessionId}] GET /mcp: SSE connection closed by client.`);
     const session = activeSessions.get(sessionId);
-    if (session && typeof session.transport?.close === 'function') {
-        // session.transport.close();
-    }
+    // Optional: If SDK provided a specific disconnect for transport, call it.
+    // if (session && typeof session.transport?.close === 'function') {
+    //   session.transport.close();
+    // }
     activeSessions.delete(sessionId);
     console.error(`[${sessionId}] Session removed. Total active: ${activeSessions.size}`);
+    // If mcpServer had a disconnect method:
+    // mcpServer.disconnect(clientTransport);
   });
 
   mcpServer.connect(clientTransport)
-    .then(() => console.error(`[${sessionId}] MCP Server connected to transport.`))
+    .then(() => {
+      console.error(`[${sessionId}] MCP Server connected to transport. SSE stream initialized by transport.`);
+      // Now that the transport has set its headers and the stream is ready,
+      // send your custom session ID event.
+      // Ensure the response object 'res' is still valid and the stream is open.
+      if (!res.writableEnded) {
+        res.write(`event: mcp-session-id\ndata: ${JSON.stringify({ sessionId })}\n\n`);
+        console.error(`[${sessionId}] Sent mcp-session-id event to client over established stream.`);
+      } else {
+        console.error(`[${sessionId}] WARNING: SSE stream was already ended before mcp-session-id event could be sent.`);
+      }
+    })
     .catch(err => {
-      console.error(`[${sessionId}] MCP handshake error:`, err);
-      activeSessions.delete(sessionId);
+      console.error(`[${sessionId}] MCP handshake error or error during connect:`, err);
+      // If connect fails, the session might not be fully usable or established.
+      // It's already removed from activeSessions in the 'close' event if that triggers,
+      // but if 'close' doesn't trigger before this catch, ensure cleanup.
+      if (activeSessions.has(sessionId)) {
+          activeSessions.delete(sessionId);
+          console.error(`[${sessionId}] Session removed due to connection error. Total active: ${activeSessions.size}`);
+      }
+      // Avoid trying to write to res if headers might have been an issue
+      if (!res.headersSent) {
+        res.status(500).send("MCP connection error");
+      } else if (!res.writableEnded) {
+        // If headers were sent but stream is open, try to close it gracefully if possible
+        res.end();
+      }
     });
 });
 
