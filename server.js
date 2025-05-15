@@ -290,6 +290,9 @@ app.get("/mcp", (req, res) => {
 });
 
 app.post("/mcp", (req, res) => {
+  // Debug: log all incoming headers for troubleshooting content-type issues
+  console.error("POST /mcp received. Headers:", JSON.stringify(req.headers, null, 2)); 
+
   const sessionId = req.header("X-MCP-Session-ID");
   if (!sessionId) {
     console.error("POST /mcp: Missing X-MCP-Session-ID header.");

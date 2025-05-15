@@ -24,22 +24,24 @@ def send_mcp_post_request(session_id, method, params=None):
         "Content-Type": "application/json-rpc",
         "X-MCP-Session-ID": session_id
     }
-    payload = {
+    payload_dict = {
         "jsonrpc": "2.0",
         "id": next_request_id(),
         "method": method,
     }
     if params is not None:
-        payload["params"] = params
+        payload_dict["params"] = params
+
+    payload_str = json.dumps(payload_dict)
 
     print(f"\n--- Sending MCP Request ---")
     print(f"URL: {MCP_ENDPOINT}")
     print(f"Method: {method}")
     print(f"Headers: {json.dumps(headers)}")
-    print(f"Payload: {json.dumps(payload, indent=2)}")
+    print(f"Payload String: {payload_str}")
 
     try:
-        response = requests.post(MCP_ENDPOINT, json=payload, headers=headers, timeout=15) # Increased timeout
+        response = requests.post(MCP_ENDPOINT, data=payload_str, headers=headers, timeout=15)
         print(f"Response Status: {response.status_code}")
         if response.text:
             try:
