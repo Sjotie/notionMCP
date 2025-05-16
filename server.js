@@ -11,6 +11,11 @@ import { AsyncLocalStorage } from "async_hooks";
 dotenv.config();
 const als = new AsyncLocalStorage();
 
+// --- Define server name and version as constants ---
+const MY_SERVER_NAME = "notion-mcp-url-token";
+const MY_SERVER_VERSION = "1.2.0";
+const MCP_PROTOCOL_VERSION = "2024-11-05"; // Define your supported MCP version
+
 // --- User Token to Notion API Key Mapping (Server-Side Secure Storage) ---
 // In a real application, this would come from a secure database or vault,
 // mapping user tokens (from the URL) to their encrypted Notion API keys.
@@ -35,8 +40,8 @@ function getNotionApiKeyForUserToken(userToken) {
 const activeClientSessions = new Map(); // Keyed by userToken from URL
 
 const mcpServer = new McpSDKServer({
-  name: "notion-mcp-url-token",
-  version: "1.2.0",
+  name: MY_SERVER_NAME,
+  version: MY_SERVER_VERSION,
 }, {
   capabilities: { tools: true },
 });
@@ -52,7 +57,7 @@ mcpServer.setRequestHandler(z.object({
   return undefined;
 }, { priority: -1 });
 
-// --- 'initialize' Handler (No longer needs to get API key from options) ---
+// --- 'initialize' Handler (Revised) ---
 mcpServer.setRequestHandler(
   z.object({ method: z.literal("initialize"), params: z.any().optional() }),
   async (jsonRpcRequest) => {
@@ -60,18 +65,22 @@ mcpServer.setRequestHandler(
     const userToken = store?.currentUserToken;
     console.error(`[${userToken || 'initialize'}] MCP 'initialize' (URL token).`);
 
-    // Optionally log if client sends a notionApiKey in initializationOptions
     const clientProvidedApiKeyInInitOptions = jsonRpcRequest.params?.initializationOptions?.notionApiKey;
     if (clientProvidedApiKeyInInitOptions) {
       console.warn(`[${userToken || 'initialize'}] Client sent 'notionApiKey' in initializationOptions. This is noted, but server uses key derived from URL token ('${userToken}').`);
     }
 
-    // Return the full InitializeResult object as required by MCP spec and Python SDK
+    // Debug log to inspect mcpServer.serverInfo and mcpServer.capabilities
+    // console.error(`[${userToken || 'initialize'}] DEBUG: mcpServer.serverInfo is:`, JSON.stringify(mcpServer.serverInfo, null, 2));
+    // console.error(`[${userToken || 'initialize'}] DEBUG: mcpServer.capabilities is:`, JSON.stringify(mcpServer.capabilities, null, 2));
+    // console.error(`[${userToken || 'initialize'}] DEBUG: Direct mcpServer.name: ${mcpServer.name}, mcpServer.version: ${mcpServer.version}`); // If serverInfo is an issue
+
+    // Construct the full InitializeResult object using defined constants
     return {
-      protocolVersion: "2024-11-05",
+      protocolVersion: MCP_PROTOCOL_VERSION,
       serverInfo: {
-        name: mcpServer.serverInfo.name,
-        version: mcpServer.serverInfo.version
+        name: MY_SERVER_NAME,
+        version: MY_SERVER_VERSION
       },
       capabilities: mcpServer.capabilities
     };
