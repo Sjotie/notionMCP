@@ -78,28 +78,37 @@ mcpServer.setRequestHandler(
       version: MY_SERVER_VERSION
     };
 
-    const capabilitiesResponsePart = mcpServer.capabilities;
+    // --- FIX: Explicitly define the capabilities object here ---
+    const capabilitiesResponsePart = {
+      tools: true // This server supports tools.
+      // You could add other capabilities here if needed
+    };
 
-    // Log exactly what we are about to return
     const initializeResult = {
       protocolVersion: MCP_PROTOCOL_VERSION,
       serverInfo: serverInfoResponsePart,
-      capabilities: capabilitiesResponsePart
+      capabilities: capabilitiesResponsePart // Assign the explicitly defined object
     };
 
-    // Extra: log the *actual* object, not just JSON
+    // Your DEBUG log (optional, but good for seeing the object before stringify)
     console.error(`${logPrefix} [DEBUG] About to return InitializeResult object:`, initializeResult);
     console.error(`${logPrefix} Preparing to return InitializeResult:`, JSON.stringify(initializeResult, null, 2));
 
     // Defensive check before returning
     if (!initializeResult.serverInfo || typeof initializeResult.serverInfo.name === 'undefined') {
       console.error(`${logPrefix} CRITICAL ERROR: serverInfo or serverInfo.name is undefined before returning!`);
-      // Fallback to a minimal valid structure if something went wrong, though it shouldn't
+      // Fallback to a minimal valid structure if something went wrong
       return {
         protocolVersion: MCP_PROTOCOL_VERSION,
         serverInfo: { name: "fallback-server-name", version: "0.0.0" },
-        capabilities: { tools: true }
+        capabilities: { tools: true } // Ensure fallback also has capabilities
       };
+    }
+    // Add a similar check for capabilities for robustness during debugging
+    if (!initializeResult.capabilities || typeof initializeResult.capabilities.tools === 'undefined') {
+        console.error(`${logPrefix} CRITICAL ERROR: capabilities or capabilities.tools is undefined before returning! Check construction of capabilitiesResponsePart.`);
+         // Fallback for capabilities if something went wrong in its construction
+        initializeResult.capabilities = { tools: true };
     }
 
     return initializeResult;
