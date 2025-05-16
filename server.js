@@ -261,7 +261,10 @@ app.get("/mcp/:userToken", (req, res) => {
   // Run mcpServer.connect within an ALS context for this userToken
   als.run({ currentUserToken: userToken, currentTransport: clientTransport }, () => {
     mcpServer.connect(clientTransport)
-      .then(() => console.error(`[${userToken}] MCP Server connected to transport.`))
+      .then(() => {
+        console.error(`[${userToken}] MCP Server connected to transport.`);
+        // No custom mcp-session-id event is sent; session is identified by URL token.
+      })
       .catch(err => {
         console.error(`[${userToken}] MCP handshake error:`, err);
         activeClientSessions.delete(userToken);
