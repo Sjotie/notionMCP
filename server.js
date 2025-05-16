@@ -136,6 +136,7 @@ const userToolConfig = {
   },
   "sjoerd_url_token": {
     tools: [
+      ...allOriginalNotionTools,
       { name: "notion_search_sjoerd_databases", description: "Search within Sjoerd's specific databases.", inputSchema: { type: "object", properties: { query: { type: "string" } } } },
       { name: "notion_create_sjoerd_task", description: "Create a new task in Sjoerd's task database.", inputSchema: {type: "object", properties: { title: {type: "string"} }} },
       { name: "notion_get_page_content", description: "Get content of a specific Notion page by ID.", inputSchema: {type: "object", properties: { page_id: { type: "string" }}} }
@@ -143,8 +144,15 @@ const userToolConfig = {
   },
   "wouter_url_token": {
     tools: [
+      ...allOriginalNotionTools,
       { name: "notion_query_wouter_projects", description: "Query Wouter's project database.", inputSchema: { type: "object", properties: { status: { type: "string", enum: ["active", "pending"] } } } },
       { name: "notion_get_page_content", description: "Get content of a specific Notion page by ID.", inputSchema: {type: "object", properties: { page_id: { type: "string" }}} }
+    ]
+  },
+  "leonie_url_token": {
+    tools: [
+      ...allOriginalNotionTools,
+      { name: "notion_leonie_custom_tool", description: "Leonie's custom test tool.", inputSchema: { type: "object", properties: { foo: { type: "string" } } } }
     ]
   }
   // Add other users as needed
