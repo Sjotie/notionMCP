@@ -57,33 +57,50 @@ mcpServer.setRequestHandler(z.object({
   return undefined;
 }, { priority: -1 });
 
-// --- 'initialize' Handler (Revised) ---
+// --- 'initialize' Handler (Hardened and with extra logging) ---
 mcpServer.setRequestHandler(
   z.object({ method: z.literal("initialize"), params: z.any().optional() }),
   async (jsonRpcRequest) => {
     const store = als.getStore();
     const userToken = store?.currentUserToken;
-    console.error(`[${userToken || 'initialize'}] MCP 'initialize' (URL token).`);
+    const logPrefix = `[${userToken || 'initialize'}]`;
+
+    console.error(`${logPrefix} MCP 'initialize' (URL token).`);
 
     const clientProvidedApiKeyInInitOptions = jsonRpcRequest.params?.initializationOptions?.notionApiKey;
     if (clientProvidedApiKeyInInitOptions) {
-      console.warn(`[${userToken || 'initialize'}] Client sent 'notionApiKey' in initializationOptions. This is noted, but server uses key derived from URL token ('${userToken}').`);
+      console.warn(`${logPrefix} Client sent 'notionApiKey' in initializationOptions. Server uses key from URL token ('${userToken}').`);
     }
 
-    // Debug log to inspect mcpServer.serverInfo and mcpServer.capabilities
-    // console.error(`[${userToken || 'initialize'}] DEBUG: mcpServer.serverInfo is:`, JSON.stringify(mcpServer.serverInfo, null, 2));
-    // console.error(`[${userToken || 'initialize'}] DEBUG: mcpServer.capabilities is:`, JSON.stringify(mcpServer.capabilities, null, 2));
-    // console.error(`[${userToken || 'initialize'}] DEBUG: Direct mcpServer.name: ${mcpServer.name}, mcpServer.version: ${mcpServer.version}`); // If serverInfo is an issue
-
-    // Construct the full InitializeResult object using defined constants
-    return {
-      protocolVersion: MCP_PROTOCOL_VERSION,
-      serverInfo: {
-        name: MY_SERVER_NAME,
-        version: MY_SERVER_VERSION
-      },
-      capabilities: mcpServer.capabilities
+    // Explicitly construct the serverInfo and capabilities to be returned
+    const serverInfoResponsePart = {
+      name: MY_SERVER_NAME,
+      version: MY_SERVER_VERSION
     };
+
+    const capabilitiesResponsePart = mcpServer.capabilities;
+
+    // Log exactly what we are about to return
+    const initializeResult = {
+      protocolVersion: MCP_PROTOCOL_VERSION,
+      serverInfo: serverInfoResponsePart,
+      capabilities: capabilitiesResponsePart
+    };
+
+    console.error(`${logPrefix} Preparing to return InitializeResult:`, JSON.stringify(initializeResult, null, 2));
+
+    // Defensive check before returning
+    if (!initializeResult.serverInfo || typeof initializeResult.serverInfo.name === 'undefined') {
+      console.error(`${logPrefix} CRITICAL ERROR: serverInfo or serverInfo.name is undefined before returning!`);
+      // Fallback to a minimal valid structure if something went wrong, though it shouldn't
+      return {
+        protocolVersion: MCP_PROTOCOL_VERSION,
+        serverInfo: { name: "fallback-server-name", version: "0.0.0" },
+        capabilities: { tools: true }
+      };
+    }
+
+    return initializeResult;
   }, { priority: 1 }
 );
 
