@@ -41,153 +41,107 @@ const mcpServer = new McpSDKServer({
   capabilities: { tools: true },
 });
 
+// --- Generic Request Logger ---
 mcpServer.setRequestHandler(z.object({
   method: z.string(),
   params: z.any().optional()
 }), async (jsonRpcRequest) => {
   const store = als.getStore();
-  const sessionIdForLog = store?.currentSessionId || "unknown_session";
-  console.error(`[${sessionIdForLog}] Received raw MCP request method:`, jsonRpcRequest.method);
-  // Uncomment for deep debugging:
-  // console.error(`[${sessionIdForLog}] Full JSON-RPC Request:`, JSON.stringify(jsonRpcRequest, null, 2));
+  const userToken = store?.currentUserToken || "unknown_user_token";
+  console.error(`[${userToken}] MCP Method: ${jsonRpcRequest.method}`);
   return undefined;
 }, { priority: -1 });
 
-// --- Handler for the 'initialize' method to capture API Key ---
+// --- 'initialize' Handler (No longer needs to get API key from options) ---
 mcpServer.setRequestHandler(
-  z.object({
-    method: z.literal("initialize"),
-    params: z.object({
-      initializationOptions: z.object({
-        notionApiKey: z.string().optional(),
-      }).passthrough().optional(),
-    }).passthrough(),
-  }),
+  z.object({ method: z.literal("initialize"), params: z.any().optional() }),
   async (jsonRpcRequest) => {
     const store = als.getStore();
-    const sessionId = store?.currentSessionId;
-    console.error(`[${sessionId || 'initialize'}] MCP 'initialize' handler invoked (ALS).`);
-
-    if (!sessionId) {
-      console.error(`[initialize] CRITICAL: Could not get sessionId from AsyncLocalStorage. API key cannot be stored.`);
-      return { capabilities: mcpServer.capabilities };
-    }
-
-    const sessionData = activeSessions.get(sessionId);
-
-    if (sessionData) {
-      const clientProvidedApiKey = jsonRpcRequest.params?.initializationOptions?.notionApiKey;
-      if (clientProvidedApiKey) {
-        sessionData.notionApiKey = clientProvidedApiKey;
-        // No need to set again, it's a reference
-        console.error(`[${sessionId}] User-specific Notion API Key stored via initialize.`);
-      } else {
-        console.error(`[${sessionId}] No Notion API Key found in initializationOptions.`);
-      }
-    } else {
-      console.error(`[${sessionId}] WARNING: Session data not found in activeSessions map during initialize.`);
-    }
+    const userToken = store?.currentUserToken;
+    console.error(`[${userToken || 'initialize'}] MCP 'initialize' (URL token).`);
+    // API key is already associated with the session via userToken in activeClientSessions
+    // and set during the GET request.
+    // initializationOptions from client are still passed through if client sends any.
     return { capabilities: mcpServer.capabilities };
-  },
-  { priority: 1 }
+  }, { priority: 1 }
 );
 
-// --- 'tools/list' Handler (Tool schemas are clean) ---
-mcpServer.setRequestHandler(z.object({
-  method: z.literal("tools/list")
-}), async (jsonRpcRequest) => {
-  const store = als.getStore();
-  const sessionId = store?.currentSessionId;
-  console.error(`[${sessionId || 'tools/list'}] MCP 'tools/list' handler invoked (ALS).`);
-  // Return the same tools for everyone; access control is per-call via API key
-  return {
-    tools: [
-      // (Paste your tool definitions here, unchanged, but without any notionApiKey in inputSchema)
-      // For brevity, you can copy your previous tool definitions here.
-      // ... (omitted for brevity, but should be the same as before)
-    ]
-  };
+// --- 'tools/list' Handler ---
+mcpServer.setRequestHandler(z.object({ method: z.literal("tools/list") }),
+  async (jsonRpcRequest) => {
+    const store = als.getStore();
+    const userToken = store?.currentUserToken;
+    console.error(`[${userToken || 'tools/list'}] MCP 'tools/list' (URL token).`);
+    return {
+      tools: [
+        { name: "list-databases", description: "List all databases in the user's Notion workspace.", inputSchema: {type: "object", properties: {}} },
+        { name: "query-database", description: "Query a Notion database by ID.", inputSchema: {type: "object", properties: { database_id: { type: "string" }, filter: { type: "object" }, sorts: { type: "array" }, start_cursor: { type: "string" }, page_size: { type: "number" }}} },
+        { name: "create-page", description: "Create a new page in a Notion database.", inputSchema: {type: "object", properties: { parent_id: { type: "string" }, properties: { type: "object" }, children: { type: "array" }}} },
+        { name: "update-page", description: "Update a Notion page by ID.", inputSchema: {type: "object", properties: { page_id: { type: "string" }, properties: { type: "object" }, archived: { type: "boolean" }}} },
+        { name: "create-database", description: "Create a new Notion database.", inputSchema: {type: "object", properties: { parent_id: { type: "string" }, title: { type: "array" }, properties: { type: "object" }, icon: { type: "object" }, cover: { type: "object" }}} },
+        { name: "update-database", description: "Update a Notion database by ID.", inputSchema: {type: "object", properties: { database_id: { type: "string" }, title: { type: "array" }, description: { type: "array" }, properties: { type: "object" }}} },
+        { name: "get-page", description: "Retrieve a Notion page by ID.", inputSchema: {type: "object", properties: { page_id: { type: "string" }}} },
+        { name: "get-block-children", description: "List children of a Notion block.", inputSchema: {type: "object", properties: { block_id: { type: "string" }, start_cursor: { type: "string" }, page_size: { type: "number" }}} },
+        { name: "append-block-children", description: "Append children to a Notion block.", inputSchema: {type: "object", properties: { block_id: { type: "string" }, children: { type: "array" }, after: { type: "string" }}} },
+        { name: "update-block", description: "Update a Notion block by ID.", inputSchema: {type: "object", properties: { block_id: { type: "string" }, block_type: { type: "string" }, content: { type: "object" }, archived: { type: "boolean" }}} },
+        { name: "get-block", description: "Retrieve a Notion block by ID.", inputSchema: {type: "object", properties: { block_id: { type: "string" }}} },
+        { name: "search", description: "Search the user's Notion workspace.", inputSchema: {type: "object", properties: { query: { type: "string" }, filter: { type: "object" }, sort: { type: "object" }, start_cursor: { type: "string" }, page_size: { type: "number" }}} }
+      ]
+    };
 });
 
-// --- 'tools/call' Handler (Uses API key from session) ---
+// --- 'tools/call' Handler ---
 mcpServer.setRequestHandler(z.object({
   method: z.literal("tools/call"),
   params: z.object({ name: z.string(), arguments: z.any().optional() })
 }), async (jsonRpcRequest) => {
   const { name, arguments: args } = jsonRpcRequest.params;
   const store = als.getStore();
-  const sessionId = store?.currentSessionId;
+  const userToken = store?.currentUserToken;
 
-  console.error(`[${sessionId || 'tools/call'}] MCP 'tools/call' for tool: ${name} (ALS).`);
+  console.error(`[${userToken || 'tools/call'}] MCP 'tools/call' for tool: ${name} (URL token).`);
 
-  if (!sessionId) {
-    console.error(`[${name}] CRITICAL: Could not get sessionId from AsyncLocalStorage for tools/call.`);
-    return { isError: true, content: [{ type: "text", text: "Internal Server Error: Session context lost." }] };
+  if (!userToken) {
+    console.error(`[${name}] CRITICAL: Could not get userToken from AsyncLocalStorage for tools/call.`);
+    return { isError: true, content: [{ type: "text", text: "Internal Server Error: User token context lost." }] };
   }
 
-  const sessionData = activeSessions.get(sessionId);
-  if (!sessionData) {
-      console.error(`[${sessionId}] CRITICAL: Session data not found in activeSessions for tools/call.`);
-      return { isError: true, content: [{ type: "text", text: "Internal Server Error: Session data missing." }] };
+  const sessionData = activeClientSessions.get(userToken);
+  if (!sessionData || !sessionData.notionApiKey) {
+    console.error(`[${userToken}] Tool '${name}': No Notion API Key found for this user token in session or default.`);
+    return { isError: true, content: [{ type: "text", text: `Authorization Error: Notion API Key not configured for your session token.` }] };
   }
 
-  let userApiKey = sessionData.notionApiKey;
-  let effectiveApiKey = userApiKey;
-
-  if (!effectiveApiKey) {
-    effectiveApiKey = process.env.NOTION_API_KEY;
-    if (effectiveApiKey) {
-      console.warn(`[${sessionId}] Tool '${name}': Using server default Notion API Key (no client key in session).`);
-    } else {
-      console.error(`[${sessionId}] Tool '${name}': CRITICAL: No Notion API Key for session and no server default.`);
-      return { isError: true, content: [{ type: "text", text: `Authorization Error: No Notion API Key configured for your session or as server default for tool '${name}'.` }] };
-    }
-  }
-
-  const notionForUser = new NotionClient({ auth: effectiveApiKey });
+  const notionForUser = new NotionClient({ auth: sessionData.notionApiKey });
+  console.log(`[${userToken}] Using API Key ending '...${sessionData.notionApiKey.slice(-4)}' for tool '${name}'.`);
 
   try {
-    console.log(`[${sessionId}] Attempting to execute tool '${name}' with effective API key ending: ${effectiveApiKey.slice(-4)}`);
-
     if (name === "list-databases") {
-      console.log(`[${sessionId}] Executing 'list-databases' for user.`);
-      const response = await notionForUser.search({
-        filter: { property: "object", value: "database" },
-        page_size: 100,
-        sort: { direction: "descending", timestamp: "last_edited_time" }
-      });
-      console.log(`[${sessionId}] 'list-databases' successful. Found ${response.results.length} databases.`);
+      const response = await notionForUser.search({ filter: { property: "object", value: "database" }, page_size: 100, sort: { direction: "descending", timestamp: "last_edited_time" } });
       return { content: [{ type: "text", text: JSON.stringify(response.results, null, 2) }] };
     }
     else if (name === "query-database") {
       const { database_id, filter, sorts, start_cursor, page_size } = args || {};
       if (!database_id) {
-        console.error(`[${sessionId}] 'query-database' missing database_id.`);
         return { isError: true, content: [{ type: "text", text: "Error: database_id is required for query-database."}] };
       }
-      console.log(`[${sessionId}] Executing 'query-database' for user on DB: ${database_id}.`);
       const queryParams = { database_id, page_size: page_size || 100, filter, sorts, start_cursor };
       Object.keys(queryParams).forEach(key => queryParams[key] === undefined && delete queryParams[key]);
       const response = await notionForUser.databases.query(queryParams);
-      console.log(`[${sessionId}] 'query-database' successful. Found ${response.results.length} items.`);
       return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
     }
     else if (name === "create-page") {
       const { parent_id, properties, children } = args || {};
       const pageParams = { parent: { database_id: parent_id }, properties };
       if (children) pageParams.children = children;
-      console.log(`[${sessionId}] Executing 'create-page' for user.`);
       const response = await notionForUser.pages.create(pageParams);
-      console.log(`[${sessionId}] 'create-page' successful. Page created with id: ${response.id}`);
       return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
     }
     else if (name === "update-page") {
       const { page_id, properties, archived } = args || {};
       const updateParams = { page_id, properties };
       if (archived !== undefined) updateParams.archived = archived;
-      console.log(`[${sessionId}] Executing 'update-page' for user.`);
       const response = await notionForUser.pages.update(updateParams);
-      console.log(`[${sessionId}] 'update-page' successful. Page updated with id: ${response.id}`);
       return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
     }
     else if (name === "create-database") {
@@ -201,9 +155,7 @@ mcpServer.setRequestHandler(z.object({
         databaseParams.icon = icon;
       }
       if (cover) databaseParams.cover = cover;
-      console.log(`[${sessionId}] Executing 'create-database' for user.`);
       const response = await notionForUser.databases.create(databaseParams);
-      console.log(`[${sessionId}] 'create-database' successful. Database created with id: ${response.id}`);
       return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
     }
     else if (name === "update-database") {
@@ -212,17 +164,13 @@ mcpServer.setRequestHandler(z.object({
       if (title !== undefined) updateParams.title = title;
       if (description !== undefined) updateParams.description = description;
       if (properties !== undefined) updateParams.properties = properties;
-      console.log(`[${sessionId}] Executing 'update-database' for user.`);
       const response = await notionForUser.databases.update(updateParams);
-      console.log(`[${sessionId}] 'update-database' successful. Database updated with id: ${response.id}`);
       return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
     }
     else if (name === "get-page") {
       let { page_id } = args || {};
       page_id = page_id.replace(/-/g, "");
-      console.log(`[${sessionId}] Executing 'get-page' for user.`);
       const response = await notionForUser.pages.retrieve({ page_id });
-      console.log(`[${sessionId}] 'get-page' successful. Page id: ${response.id}`);
       return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
     }
     else if (name === "get-block-children") {
@@ -230,9 +178,7 @@ mcpServer.setRequestHandler(z.object({
       block_id = block_id.replace(/-/g, "");
       const params = { block_id, page_size: page_size || 100 };
       if (start_cursor) params.start_cursor = start_cursor;
-      console.log(`[${sessionId}] Executing 'get-block-children' for user.`);
       const response = await notionForUser.blocks.children.list(params);
-      console.log(`[${sessionId}] 'get-block-children' successful. Found ${response.results.length} children.`);
       return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
     }
     else if (name === "append-block-children") {
@@ -240,9 +186,7 @@ mcpServer.setRequestHandler(z.object({
       block_id = block_id.replace(/-/g, "");
       const params = { block_id, children };
       if (after) params.after = after.replace(/-/g, "");
-      console.log(`[${sessionId}] Executing 'append-block-children' for user.`);
       const response = await notionForUser.blocks.children.append(params);
-      console.log(`[${sessionId}] 'append-block-children' successful.`);
       return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
     }
     else if (name === "update-block") {
@@ -250,17 +194,13 @@ mcpServer.setRequestHandler(z.object({
       block_id = block_id.replace(/-/g, "");
       const updateParams = { block_id, [block_type]: content };
       if (archived !== undefined) updateParams.archived = archived;
-      console.log(`[${sessionId}] Executing 'update-block' for user.`);
       const response = await notionForUser.blocks.update(updateParams);
-      console.log(`[${sessionId}] 'update-block' successful. Block updated with id: ${response.id}`);
       return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
     }
     else if (name === "get-block") {
       let { block_id } = args || {};
       block_id = block_id.replace(/-/g, "");
-      console.log(`[${sessionId}] Executing 'get-block' for user.`);
       const response = await notionForUser.blocks.retrieve({ block_id });
-      console.log(`[${sessionId}] 'get-block' successful. Block id: ${response.id}`);
       return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
     }
     else if (name === "search") {
@@ -269,20 +209,16 @@ mcpServer.setRequestHandler(z.object({
       if (filter) searchParams.filter = filter;
       if (sort) searchParams.sort = sort;
       if (start_cursor) searchParams.start_cursor = start_cursor;
-      console.log(`[${sessionId}] Executing 'search' for user.`);
       const response = await notionForUser.search(searchParams);
-      console.log(`[${sessionId}] 'search' successful. Found ${response.results.length} results.`);
       return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
     }
     else {
-      console.error(`[${sessionId}] Unknown tool called: ${name}`);
       return { isError: true, content: [{ type: "text", text: `Unknown tool: ${name}` }] };
     }
   } catch (error) {
-    console.error(`[${sessionId}] Error executing tool '${name}': Code: ${error.code}, Message: ${error.message}`);
     let errorMessage = `Error executing tool '${name}': ${error.message}`;
     if (error.code === 'unauthorized' || (error.body && typeof error.body === 'string' && error.body.includes('unauthorized')) || (error.body && typeof error.body === 'object' && error.body.code === 'unauthorized')) {
-        errorMessage = `Notion API Error for '${name}': Authorization failed. The API Key for your session (ending with ${effectiveApiKey.slice(-4)}) may be invalid or lack necessary permissions.`;
+        errorMessage = `Notion API Error for '${name}': Authorization failed. The API Key for your session (ending with ${sessionData.notionApiKey.slice(-4)}) may be invalid or lack necessary permissions.`;
     }
     return { isError: true, content: [{ type: "text", text: errorMessage }] };
   }
