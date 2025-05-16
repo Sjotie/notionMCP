@@ -6,27 +6,39 @@ import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { z } from "zod";
 import { Client as NotionClient } from "@notionhq/client";
 import dotenv from "dotenv";
-import { v4 as uuidv4 } from "uuid";
 import { AsyncLocalStorage } from "async_hooks";
 
-// Load environment variables
 dotenv.config();
-
 const als = new AsyncLocalStorage();
 
-// --- Session Management ---
-// Stores { transport: SSEServerTransport, notionApiKey: string | null }
-const activeSessions = new Map(); // Map<sessionId, SessionData>
-// --------------------------
+// --- User Token to Notion API Key Mapping (Server-Side Secure Storage) ---
+// In a real application, this would come from a secure database or vault,
+// mapping user tokens (from the URL) to their encrypted Notion API keys.
+// For this example, we'll use environment variables based on tokens.
+// Example: USERTOKEN1_NOTION_API_KEY=secret_abc...
+//          USERTOKEN2_NOTION_API_KEY=secret_xyz...
+function getNotionApiKeyForUserToken(userToken) {
+  if (!userToken) return null;
+  // Example: If userToken is "sjoerd_token", look for SJOERD_TOKEN_NOTION_API_KEY
+  const envVarName = `${userToken.toUpperCase()}_NOTION_API_KEY`;
+  const apiKey = process.env[envVarName];
+  if (apiKey) {
+    console.log(`[${userToken}] Found Notion API key in env var: ${envVarName}`);
+    return apiKey;
+  }
+  console.warn(`[${userToken}] No specific Notion API key found in env for token. Falling back to default if available.`);
+  return process.env.DEFAULT_NOTION_API_KEY; // A general fallback
+}
+// ----------------------------------------------------------------------
 
- // Create MCP server instance
+// Stores { transport: SSEServerTransport, notionApiKey: string | null, userToken: string }
+const activeClientSessions = new Map(); // Keyed by userToken from URL
+
 const mcpServer = new McpSDKServer({
-  name: "notion-mcp-multiuser",
-  version: "1.1.0",
+  name: "notion-mcp-url-token",
+  version: "1.2.0",
 }, {
-  capabilities: {
-    tools: true // Indicate that the server supports tools
-  },
+  capabilities: { tools: true },
 });
 
 mcpServer.setRequestHandler(z.object({
@@ -279,79 +291,64 @@ mcpServer.setRequestHandler(z.object({
 // --- Express App Setup ---
 const app = express();
 
-app.get("/mcp", (req, res) => {
-  const sessionId = uuidv4();
-  console.error(`[${sessionId}] GET /mcp: New client connection. Assigning sessionId.`);
+// SSE Connection Endpoint - path now includes :userToken
+app.get("/mcp/:userToken", (req, res) => {
+  const userToken = req.params.userToken;
+  console.error(`[${userToken}] GET /mcp/${userToken}: New client connection.`);
 
-  // SSEServerTransport will set the necessary SSE headers on 'res' when it starts.
-  const clientTransport = new SSEServerTransport("/mcp", res);
-  clientTransport._customSessionId = sessionId;
+  const userNotionApiKey = getNotionApiKeyForUserToken(userToken);
+  if (!userNotionApiKey) {
+    console.error(`[${userToken}] Unauthorized: No Notion API Key configured for this token.`);
+    return res.status(403).json({ error: "Forbidden: Invalid user token or API key not configured." });
+  }
 
-  activeSessions.set(sessionId, { transport: clientTransport, notionApiKey: null });
-  console.error(`[${sessionId}] Session created. Total active: ${activeSessions.size}`);
+  // For SSEServerTransport, the `messagesPath` is where the client should POST.
+  // If the client POSTs to the same unique URL, make messagesPath unique too.
+  // Or, if client always POSTs to a generic /mcp, we have a problem.
+  // Let's assume client POSTs to /mcp/:userToken
+  const messagesPathForClient = `/mcp/${userToken}`;
+  const clientTransport = new SSEServerTransport(messagesPathForClient, res);
+
+  activeClientSessions.set(userToken, {
+    transport: clientTransport,
+    notionApiKey: userNotionApiKey, // Store the resolved API key
+    userToken: userToken
+  });
+  console.error(`[${userToken}] Session created with Notion API key. Total active: ${activeClientSessions.size}`);
 
   res.on('close', () => {
-    console.error(`[${sessionId}] GET /mcp: SSE connection closed by client.`);
-    const session = activeSessions.get(sessionId);
-    // Optional: If SDK provided a specific disconnect for transport, call it.
-    // if (session && typeof session.transport?.close === 'function') {
-    //   session.transport.close();
-    // }
-    activeSessions.delete(sessionId);
-    console.error(`[${sessionId}] Session removed. Total active: ${activeSessions.size}`);
-    // If mcpServer had a disconnect method:
-    // mcpServer.disconnect(clientTransport);
+    console.error(`[${userToken}] GET /mcp/${userToken}: SSE connection closed by client.`);
+    activeClientSessions.delete(userToken);
+    console.error(`[${userToken}] Session removed. Total active: ${activeClientSessions.size}`);
   });
 
-  mcpServer.connect(clientTransport)
-    .then(() => {
-      console.error(`[${sessionId}] MCP Server connected to transport. SSE stream initialized by transport.`);
-      // Now that the transport has set its headers and the stream is ready,
-      // send your custom session ID event.
-      // Ensure the response object 'res' is still valid and the stream is open.
-      if (!res.writableEnded) {
-        res.write(`event: mcp-session-id\ndata: ${JSON.stringify({ sessionId })}\n\n`);
-        console.error(`[${sessionId}] Sent mcp-session-id event to client over established stream.`);
-      } else {
-        console.error(`[${sessionId}] WARNING: SSE stream was already ended before mcp-session-id event could be sent.`);
-      }
-    })
-    .catch(err => {
-      console.error(`[${sessionId}] MCP handshake error or error during connect:`, err);
-      // If connect fails, the session might not be fully usable or established.
-      // It's already removed from activeSessions in the 'close' event if that triggers,
-      // but if 'close' doesn't trigger before this catch, ensure cleanup.
-      if (activeSessions.has(sessionId)) {
-          activeSessions.delete(sessionId);
-          console.error(`[${sessionId}] Session removed due to connection error. Total active: ${activeSessions.size}`);
-      }
-      // Avoid trying to write to res if headers might have been an issue
-      if (!res.headersSent) {
-        res.status(500).send("MCP connection error");
-      } else if (!res.writableEnded) {
-        // If headers were sent but stream is open, try to close it gracefully if possible
-        res.end();
-      }
-    });
+  // Run mcpServer.connect within an ALS context for this userToken
+  als.run({ currentUserToken: userToken, currentTransport: clientTransport }, () => {
+    mcpServer.connect(clientTransport)
+      .then(() => console.error(`[${userToken}] MCP Server connected to transport.`))
+      .catch(err => {
+        console.error(`[${userToken}] MCP handshake error:`, err);
+        activeClientSessions.delete(userToken);
+        if (!res.headersSent) res.status(500).send("MCP connection error");
+        else if (!res.writableEnded) res.end();
+      });
+  });
+  // NO EXPLICIT res.write for session ID here; session is identified by URL token.
 });
 
-app.post("/mcp", (req, res) => {
-  // Debug: log all incoming headers for troubleshooting content-type issues
-  console.error("POST /mcp received. Headers:", JSON.stringify(req.headers, null, 2)); 
+// Message POST Endpoint - path now includes :userToken
+app.post("/mcp/:userToken", (req, res) => {
+  const userToken = req.params.userToken;
+  console.error(`[${userToken}] POST /mcp/${userToken}. Headers:`, JSON.stringify(req.headers, null, 2));
 
-  const sessionId = req.header("X-MCP-Session-ID");
-  if (!sessionId) {
-    console.error("POST /mcp: Missing X-MCP-Session-ID header.");
-    return res.status(400).json({ error: "X-MCP-Session-ID header is required." });
-  }
-  const session = activeSessions.get(sessionId);
+  const session = activeClientSessions.get(userToken);
   if (session && session.transport) {
-    console.error(`[${sessionId}] POST /mcp: Routing message to transport. Setting ALS context.`);
-    als.run({ currentSessionId: sessionId, currentTransport: session.transport }, () => {
+    console.error(`[${userToken}] Routing message to transport for token. Setting ALS context.`);
+    als.run({ currentUserToken: userToken, currentTransport: session.transport }, () => {
       try {
         session.transport.handlePostMessage(req, res);
       } catch (e) {
-        console.error(`[${sessionId}] Error during handlePostMessage or subsequent processing:`, e);
+        console.error(`[${userToken}] Error during handlePostMessage or subsequent processing:`, e);
         if (!res.headersSent) {
           res.status(500).json({ error: "Internal server error processing message."});
         } else if (!res.writableEnded) {
@@ -360,12 +357,12 @@ app.post("/mcp", (req, res) => {
       }
     });
   } else {
-    console.error(`[${sessionId || 'unknown'}] POST /mcp: No active session/transport found for session ID.`);
-    res.status(404).json({ error: "Session not found or transport unavailable. Re-establish SSE connection." });
+    console.error(`[${userToken}] No active session/transport found for token.`);
+    res.status(404).json({ error: "Session not found for this user token." });
   }
 });
 
 const PORT = process.env.PORT || 8787;
-app.listen(PORT, "127.0.0.1", () => {
-  console.error(`Notion MCP Server listening on http://127.0.0.1:${PORT}/mcp`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.error(`Notion MCP Server listening. Base URL: http://0.0.0.0:${PORT}/mcp/:userToken`);
 });
