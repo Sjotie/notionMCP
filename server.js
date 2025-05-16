@@ -80,7 +80,7 @@ mcpServer.setRequestHandler(
 
     // --- FIX: Explicitly define the capabilities object here ---
     const capabilitiesResponsePart = {
-      tools: true // This server supports tools.
+      tools: {} // This server supports tools. Use an object, not a boolean, for MCP compatibility.
       // You could add other capabilities here if needed
     };
 
