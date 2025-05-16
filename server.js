@@ -249,18 +249,110 @@ mcpServer.setRequestHandler(z.object({
       }
     }
 
-    // --- Default User Tools ---
-    if (userToken === "default_user_token") {
-      if (name === "notion_search_public") {
-        const response = await notionForUser.search({ query: args.query, filter: { property: "object", value: "page" }, page_size: 5 });
-        return { content: [{ type: "text", text: JSON.stringify(response.results, null, 2) }] };
+    // --- User Leonie's Tools ---
+    if (userToken === "leonie_url_token") {
+      if (name === "notion_leonie_custom_tool") {
+        // Example custom tool for Leonie
+        return { content: [{ type: "text", text: `Leonie's custom tool executed with foo: ${args.foo}` }] };
       }
-      if (name === "notion_get_page_content") {
-        let { page_id } = args || {};
-        page_id = page_id.replace(/-/g, "");
-        const pageContent = await notionForUser.blocks.children.list({ block_id: page_id });
-        return { content: [{ type: "text", text: JSON.stringify(pageContent.results, null, 2) }] };
+    }
+
+    // --- Standard 12 Notion Tools for all users ---
+    if (name === "list-databases") {
+      const response = await notionForUser.search({ filter: { property: "object", value: "database" }, page_size: 100, sort: { direction: "descending", timestamp: "last_edited_time" } });
+      return { content: [{ type: "text", text: JSON.stringify(response.results, null, 2) }] };
+    }
+    else if (name === "query-database") {
+      const { database_id, filter, sorts, start_cursor, page_size } = args || {};
+      if (!database_id) {
+        return { isError: true, content: [{ type: "text", text: "Error: database_id is required for query-database."}] };
       }
+      const queryParams = { database_id, page_size: page_size || 100, filter, sorts, start_cursor };
+      Object.keys(queryParams).forEach(key => queryParams[key] === undefined && delete queryParams[key]);
+      const response = await notionForUser.databases.query(queryParams);
+      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
+    }
+    else if (name === "create-page") {
+      const { parent_id, properties, children } = args || {};
+      const pageParams = { parent: { database_id: parent_id }, properties };
+      if (children) pageParams.children = children;
+      const response = await notionForUser.pages.create(pageParams);
+      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
+    }
+    else if (name === "update-page") {
+      const { page_id, properties, archived } = args || {};
+      const updateParams = { page_id, properties };
+      if (archived !== undefined) updateParams.archived = archived;
+      const response = await notionForUser.pages.update(updateParams);
+      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
+    }
+    else if (name === "create-database") {
+      let { parent_id, title, properties, icon, cover } = args || {};
+      parent_id = parent_id.replace(/-/g, "");
+      const databaseParams = { parent: { type: "page_id", page_id: parent_id }, title, properties };
+      if (icon && icon.type === "emoji" && !icon.emoji) {
+        icon.emoji = "";
+        databaseParams.icon = icon;
+      } else if (icon) {
+        databaseParams.icon = icon;
+      }
+      if (cover) databaseParams.cover = cover;
+      const response = await notionForUser.databases.create(databaseParams);
+      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
+    }
+    else if (name === "update-database") {
+      const { database_id, title, description, properties: db_properties } = args || {};
+      const updateParams = { database_id };
+      if (title !== undefined) updateParams.title = title;
+      if (description !== undefined) updateParams.description = description;
+      if (db_properties !== undefined) updateParams.properties = db_properties;
+      const response = await notionForUser.databases.update(updateParams);
+      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
+    }
+    else if (name === "get-page" || (name === "notion_get_page_content" && (userToken === "sjoerd_url_token" || userToken === "wouter_url_token" || userToken === "default_user_token"))) {
+      let { page_id } = args || {};
+      page_id = page_id.replace(/-/g, "");
+      const response = await notionForUser.pages.retrieve({ page_id });
+      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
+    }
+    else if (name === "get-block-children") {
+      let { block_id, start_cursor, page_size } = args || {};
+      block_id = block_id.replace(/-/g, "");
+      const params = { block_id, page_size: page_size || 100 };
+      if (start_cursor) params.start_cursor = start_cursor;
+      const response = await notionForUser.blocks.children.list(params);
+      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
+    }
+    else if (name === "append-block-children") {
+      let { block_id, children, after } = args || {};
+      block_id = block_id.replace(/-/g, "");
+      const params = { block_id, children };
+      if (after) params.after = after.replace(/-/g, "");
+      const response = await notionForUser.blocks.children.append(params);
+      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
+    }
+    else if (name === "update-block") {
+      let { block_id, block_type, content, archived } = args || {};
+      block_id = block_id.replace(/-/g, "");
+      const updateParams = { block_id, [block_type]: content };
+      if (archived !== undefined) updateParams.archived = archived;
+      const response = await notionForUser.blocks.update(updateParams);
+      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
+    }
+    else if (name === "get-block") {
+      let { block_id } = args || {};
+      block_id = block_id.replace(/-/g, "");
+      const response = await notionForUser.blocks.retrieve({ block_id });
+      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
+    }
+    else if (name === "search") {
+      const { query, filter, sort, start_cursor, page_size } = args || {};
+      const searchParams = { query: query || "", page_size: page_size || 100 };
+      if (filter) searchParams.filter = filter;
+      if (sort) searchParams.sort = sort;
+      if (start_cursor) searchParams.start_cursor = start_cursor;
+      const response = await notionForUser.search(searchParams);
+      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
     }
 
     // Fallback for unknown tool
