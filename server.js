@@ -87,6 +87,8 @@ mcpServer.setRequestHandler(
       capabilities: capabilitiesResponsePart
     };
 
+    // Extra: log the *actual* object, not just JSON
+    console.error(`${logPrefix} [DEBUG] About to return InitializeResult object:`, initializeResult);
     console.error(`${logPrefix} Preparing to return InitializeResult:`, JSON.stringify(initializeResult, null, 2));
 
     // Defensive check before returning
@@ -104,31 +106,50 @@ mcpServer.setRequestHandler(
   }, { priority: 1 }
 );
 
-// --- 'tools/list' Handler ---
+// --- Example User-Specific Tool Configuration ---
+const userToolConfig = {
+  "default_user_token": {
+    tools: [
+      { name: "notion_search_public", description: "Search public Notion pages.", inputSchema: { type: "object", properties: { query: { type: "string" } } } },
+      { name: "notion_get_page_content", description: "Get content of a specific Notion page by ID.", inputSchema: {type: "object", properties: { page_id: { type: "string" }}} }
+    ]
+  },
+  "sjoerd_url_token": {
+    tools: [
+      { name: "notion_search_sjoerd_databases", description: "Search within Sjoerd's specific databases.", inputSchema: { type: "object", properties: { query: { type: "string" } } } },
+      { name: "notion_create_sjoerd_task", description: "Create a new task in Sjoerd's task database.", inputSchema: {type: "object", properties: { title: {type: "string"} }} },
+      { name: "notion_get_page_content", description: "Get content of a specific Notion page by ID.", inputSchema: {type: "object", properties: { page_id: { type: "string" }}} }
+    ]
+  },
+  "wouter_url_token": {
+    tools: [
+      { name: "notion_query_wouter_projects", description: "Query Wouter's project database.", inputSchema: { type: "object", properties: { status: { type: "string", enum: ["active", "pending"] } } } },
+      { name: "notion_get_page_content", description: "Get content of a specific Notion page by ID.", inputSchema: {type: "object", properties: { page_id: { type: "string" }}} }
+    ]
+  }
+  // Add other users as needed
+};
+
 mcpServer.setRequestHandler(z.object({ method: z.literal("tools/list") }),
   async (jsonRpcRequest) => {
     const store = als.getStore();
-    const userToken = store?.currentUserToken;
-    console.error(`[${userToken || 'tools/list'}] MCP 'tools/list' (URL token).`);
-    return {
-      tools: [
-        { name: "list-databases", description: "List all databases in the user's Notion workspace.", inputSchema: {type: "object", properties: {}} },
-        { name: "query-database", description: "Query a Notion database by ID.", inputSchema: {type: "object", properties: { database_id: { type: "string" }, filter: { type: "object" }, sorts: { type: "array" }, start_cursor: { type: "string" }, page_size: { type: "number" }}} },
-        { name: "create-page", description: "Create a new page in a Notion database.", inputSchema: {type: "object", properties: { parent_id: { type: "string" }, properties: { type: "object" }, children: { type: "array" }}} },
-        { name: "update-page", description: "Update a Notion page by ID.", inputSchema: {type: "object", properties: { page_id: { type: "string" }, properties: { type: "object" }, archived: { type: "boolean" }}} },
-        { name: "create-database", description: "Create a new Notion database.", inputSchema: {type: "object", properties: { parent_id: { type: "string" }, title: { type: "array" }, properties: { type: "object" }, icon: { type: "object" }, cover: { type: "object" }}} },
-        { name: "update-database", description: "Update a Notion database by ID.", inputSchema: {type: "object", properties: { database_id: { type: "string" }, title: { type: "array" }, description: { type: "array" }, properties: { type: "object" }}} },
-        { name: "get-page", description: "Retrieve a Notion page by ID.", inputSchema: {type: "object", properties: { page_id: { type: "string" }}} },
-        { name: "get-block-children", description: "List children of a Notion block.", inputSchema: {type: "object", properties: { block_id: { type: "string" }, start_cursor: { type: "string" }, page_size: { type: "number" }}} },
-        { name: "append-block-children", description: "Append children to a Notion block.", inputSchema: {type: "object", properties: { block_id: { type: "string" }, children: { type: "array" }, after: { type: "string" }}} },
-        { name: "update-block", description: "Update a Notion block by ID.", inputSchema: {type: "object", properties: { block_id: { type: "string" }, block_type: { type: "string" }, content: { type: "object" }, archived: { type: "boolean" }}} },
-        { name: "get-block", description: "Retrieve a Notion block by ID.", inputSchema: {type: "object", properties: { block_id: { type: "string" }}} },
-        { name: "search", description: "Search the user's Notion workspace.", inputSchema: {type: "object", properties: { query: { type: "string" }, filter: { type: "object" }, sort: { type: "object" }, start_cursor: { type: "string" }, page_size: { type: "number" }}} }
-      ]
-    };
+    const userToken = store?.currentUserToken || "default_user_token";
+    const logPrefix = `[${userToken || 'tools/list'}]`;
+
+    console.error(`${logPrefix} MCP 'tools/list' request.`);
+
+    const configForUser = userToolConfig[userToken] || userToolConfig["default_user_token"];
+    const toolsForUser = configForUser.tools.map(tool => ({
+        name: tool.name,
+        description: tool.description,
+        inputSchema: tool.inputSchema || { type: "object", properties: {} }
+    }));
+
+    console.error(`${logPrefix} Returning ${toolsForUser.length} tools for user.`);
+    return { tools: toolsForUser };
 });
 
-// --- 'tools/call' Handler ---
+// --- 'tools/call' Handler (user-specific logic) ---
 mcpServer.setRequestHandler(z.object({
   method: z.literal("tools/call"),
   params: z.object({ name: z.string(), arguments: z.any().optional() })
@@ -136,11 +157,12 @@ mcpServer.setRequestHandler(z.object({
   const { name, arguments: args } = jsonRpcRequest.params;
   const store = als.getStore();
   const userToken = store?.currentUserToken;
+  const logPrefix = `[${userToken || 'tools/call'}:${name}]`;
 
-  console.error(`[${userToken || 'tools/call'}] MCP 'tools/call' for tool: ${name} (URL token).`);
+  console.error(`${logPrefix} MCP 'tools/call' with args:`, JSON.stringify(args, null, 2));
 
   if (!userToken) {
-    console.error(`[${name}] CRITICAL: Could not get userToken from AsyncLocalStorage for tools/call.`);
+    console.error(`${name}] CRITICAL: Could not get userToken from AsyncLocalStorage for tools/call.`);
     return { isError: true, content: [{ type: "text", text: "Internal Server Error: User token context lost." }] };
   }
 
@@ -151,108 +173,72 @@ mcpServer.setRequestHandler(z.object({
   }
 
   const notionForUser = new NotionClient({ auth: sessionData.notionApiKey });
-  console.log(`[${userToken}] Using API Key ending '...${sessionData.notionApiKey.slice(-4)}' for tool '${name}'.`);
+  console.log(`${logPrefix} Using API Key ending '...${sessionData.notionApiKey.slice(-4)}'.`);
 
   try {
-    if (name === "list-databases") {
-      const response = await notionForUser.search({ filter: { property: "object", value: "database" }, page_size: 100, sort: { direction: "descending", timestamp: "last_edited_time" } });
-      return { content: [{ type: "text", text: JSON.stringify(response.results, null, 2) }] };
-    }
-    else if (name === "query-database") {
-      const { database_id, filter, sorts, start_cursor, page_size } = args || {};
-      if (!database_id) {
-        return { isError: true, content: [{ type: "text", text: "Error: database_id is required for query-database."}] };
+    // --- User Sjoerd's Tools ---
+    if (userToken === "sjoerd_url_token") {
+      if (name === "notion_search_sjoerd_databases") {
+        // Example: Sjoerd has a specific set of database IDs to search
+        const sjoerdsDatabaseIds = ["db_id_1", "db_id_2"]; // TODO: Replace with real IDs
+        const searchPromises = sjoerdsDatabaseIds.map(dbId =>
+          notionForUser.databases.query({ database_id: dbId, filter: { property: "Name", title: { contains: args.query } } })
+        );
+        const results = await Promise.all(searchPromises);
+        return { content: [{ type: "text", text: JSON.stringify(results.flat(), null, 2) }] };
       }
-      const queryParams = { database_id, page_size: page_size || 100, filter, sorts, start_cursor };
-      Object.keys(queryParams).forEach(key => queryParams[key] === undefined && delete queryParams[key]);
-      const response = await notionForUser.databases.query(queryParams);
-      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
-    }
-    else if (name === "create-page") {
-      const { parent_id, properties, children } = args || {};
-      const pageParams = { parent: { database_id: parent_id }, properties };
-      if (children) pageParams.children = children;
-      const response = await notionForUser.pages.create(pageParams);
-      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
-    }
-    else if (name === "update-page") {
-      const { page_id, properties, archived } = args || {};
-      const updateParams = { page_id, properties };
-      if (archived !== undefined) updateParams.archived = archived;
-      const response = await notionForUser.pages.update(updateParams);
-      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
-    }
-    else if (name === "create-database") {
-      let { parent_id, title, properties, icon, cover } = args || {};
-      parent_id = parent_id.replace(/-/g, "");
-      const databaseParams = { parent: { type: "page_id", page_id: parent_id }, title, properties };
-      if (icon && icon.type === "emoji" && !icon.emoji) {
-        icon.emoji = "📄";
-        databaseParams.icon = icon;
-      } else if (icon) {
-        databaseParams.icon = icon;
+      if (name === "notion_create_sjoerd_task") {
+        const sjoerdsTaskDbId = "sjoerds_task_db_id"; // TODO: Replace with real ID
+        const response = await notionForUser.pages.create({
+          parent: { database_id: sjoerdsTaskDbId },
+          properties: { Title: { title: [{ text: { content: args.title } }] } }
+        });
+        return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
       }
-      if (cover) databaseParams.cover = cover;
-      const response = await notionForUser.databases.create(databaseParams);
-      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
+      if (name === "notion_get_page_content") {
+        let { page_id } = args || {};
+        page_id = page_id.replace(/-/g, "");
+        const pageContent = await notionForUser.blocks.children.list({ block_id: page_id });
+        return { content: [{ type: "text", text: JSON.stringify(pageContent.results, null, 2) }] };
+      }
     }
-    else if (name === "update-database") {
-      const { database_id, title, description, properties } = args || {};
-      const updateParams = { database_id };
-      if (title !== undefined) updateParams.title = title;
-      if (description !== undefined) updateParams.description = description;
-      if (properties !== undefined) updateParams.properties = properties;
-      const response = await notionForUser.databases.update(updateParams);
-      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
+
+    // --- User Wouter's Tools ---
+    if (userToken === "wouter_url_token") {
+      if (name === "notion_query_wouter_projects") {
+        const woutersProjectDbId = "wouters_project_db_id"; // TODO: Replace with real ID
+        const response = await notionForUser.databases.query({
+          database_id: woutersProjectDbId,
+          filter: { property: "Status", select: { equals: args.status } }
+        });
+        return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
+      }
+      if (name === "notion_get_page_content") {
+        let { page_id } = args || {};
+        page_id = page_id.replace(/-/g, "");
+        const pageContent = await notionForUser.blocks.children.list({ block_id: page_id });
+        return { content: [{ type: "text", text: JSON.stringify(pageContent.results, null, 2) }] };
+      }
     }
-    else if (name === "get-page") {
-      let { page_id } = args || {};
-      page_id = page_id.replace(/-/g, "");
-      const response = await notionForUser.pages.retrieve({ page_id });
-      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
+
+    // --- Default User Tools ---
+    if (userToken === "default_user_token") {
+      if (name === "notion_search_public") {
+        const response = await notionForUser.search({ query: args.query, filter: { property: "object", value: "page" }, page_size: 5 });
+        return { content: [{ type: "text", text: JSON.stringify(response.results, null, 2) }] };
+      }
+      if (name === "notion_get_page_content") {
+        let { page_id } = args || {};
+        page_id = page_id.replace(/-/g, "");
+        const pageContent = await notionForUser.blocks.children.list({ block_id: page_id });
+        return { content: [{ type: "text", text: JSON.stringify(pageContent.results, null, 2) }] };
+      }
     }
-    else if (name === "get-block-children") {
-      let { block_id, start_cursor, page_size } = args || {};
-      block_id = block_id.replace(/-/g, "");
-      const params = { block_id, page_size: page_size || 100 };
-      if (start_cursor) params.start_cursor = start_cursor;
-      const response = await notionForUser.blocks.children.list(params);
-      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
-    }
-    else if (name === "append-block-children") {
-      let { block_id, children, after } = args || {};
-      block_id = block_id.replace(/-/g, "");
-      const params = { block_id, children };
-      if (after) params.after = after.replace(/-/g, "");
-      const response = await notionForUser.blocks.children.append(params);
-      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
-    }
-    else if (name === "update-block") {
-      let { block_id, block_type, content, archived } = args || {};
-      block_id = block_id.replace(/-/g, "");
-      const updateParams = { block_id, [block_type]: content };
-      if (archived !== undefined) updateParams.archived = archived;
-      const response = await notionForUser.blocks.update(updateParams);
-      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
-    }
-    else if (name === "get-block") {
-      let { block_id } = args || {};
-      block_id = block_id.replace(/-/g, "");
-      const response = await notionForUser.blocks.retrieve({ block_id });
-      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
-    }
-    else if (name === "search") {
-      const { query, filter, sort, start_cursor, page_size } = args || {};
-      const searchParams = { query: query || "", page_size: page_size || 100 };
-      if (filter) searchParams.filter = filter;
-      if (sort) searchParams.sort = sort;
-      if (start_cursor) searchParams.start_cursor = start_cursor;
-      const response = await notionForUser.search(searchParams);
-      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
-    }
-    else {
-      return { isError: true, content: [{ type: "text", text: `Unknown tool: ${name}` }] };
-    }
+
+    // Fallback for unknown tool
+    console.error(`${logPrefix} Unknown tool or tool not available for this user.`);
+    return { isError: true, content: [{ type: "text", text: `Tool '${name}' not found or not available for your current user context.` }] };
+
   } catch (error) {
     let errorMessage = `Error executing tool '${name}': ${error.message}`;
     if (error.code === 'unauthorized' || (error.body && typeof error.body === 'string' && error.body.includes('unauthorized')) || (error.body && typeof error.body === 'object' && error.body.code === 'unauthorized')) {
