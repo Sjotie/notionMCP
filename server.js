@@ -59,10 +59,22 @@ mcpServer.setRequestHandler(
     const store = als.getStore();
     const userToken = store?.currentUserToken;
     console.error(`[${userToken || 'initialize'}] MCP 'initialize' (URL token).`);
-    // API key is already associated with the session via userToken in activeClientSessions
-    // and set during the GET request.
-    // initializationOptions from client are still passed through if client sends any.
-    return { capabilities: mcpServer.capabilities };
+
+    // Optionally log if client sends a notionApiKey in initializationOptions
+    const clientProvidedApiKeyInInitOptions = jsonRpcRequest.params?.initializationOptions?.notionApiKey;
+    if (clientProvidedApiKeyInInitOptions) {
+      console.warn(`[${userToken || 'initialize'}] Client sent 'notionApiKey' in initializationOptions. This is noted, but server uses key derived from URL token ('${userToken}').`);
+    }
+
+    // Return the full InitializeResult object as required by MCP spec and Python SDK
+    return {
+      protocolVersion: "2024-11-05",
+      serverInfo: {
+        name: mcpServer.serverInfo.name,
+        version: mcpServer.serverInfo.version
+      },
+      capabilities: mcpServer.capabilities
+    };
   }, { priority: 1 }
 );
 
