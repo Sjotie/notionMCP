@@ -115,13 +115,24 @@ mcpServer.setRequestHandler(
   }, { priority: 1 }
 );
 
-// --- Example User-Specific Tool Configuration ---
+const allOriginalNotionTools = [
+  { name: "list-databases", description: "List all databases in the user's Notion workspace.", inputSchema: {type: "object", properties: {}} },
+  { name: "query-database", description: "Query a Notion database by ID.", inputSchema: {type: "object", properties: { database_id: { type: "string" }, filter: { type: "object" }, sorts: { type: "array" }, start_cursor: { type: "string" }, page_size: { type: "number" }}} },
+  { name: "create-page", description: "Create a new page in a Notion database.", inputSchema: {type: "object", properties: { parent_id: { type: "string" }, properties: { type: "object" }, children: { type: "array" }}} },
+  { name: "update-page", description: "Update a Notion page by ID.", inputSchema: {type: "object", properties: { page_id: { type: "string" }, properties: { type: "object" }, archived: { type: "boolean" }}} },
+  { name: "create-database", description: "Create a new Notion database.", inputSchema: {type: "object", properties: { parent_id: { type: "string" }, title: { type: "array" }, properties: { type: "object" }, icon: { type: "object" }, cover: { type: "object" }}} },
+  { name: "update-database", description: "Update a Notion database by ID.", inputSchema: {type: "object", properties: { database_id: { type: "string" }, title: { type: "array" }, description: { type: "array" }, properties: { type: "object" }}} },
+  { name: "get-page", description: "Retrieve a Notion page by ID.", inputSchema: {type: "object", properties: { page_id: { type: "string" }}} },
+  { name: "get-block-children", description: "List children of a Notion block.", inputSchema: {type: "object", properties: { block_id: { type: "string" }, start_cursor: { type: "string" }, page_size: { type: "number" }}} },
+  { name: "append-block-children", description: "Append children to a Notion block.", inputSchema: {type: "object", properties: { block_id: { type: "string" }, children: { type: "array" }, after: { type: "string" }}} },
+  { name: "update-block", description: "Update a Notion block by ID.", inputSchema: {type: "object", properties: { block_id: { type: "string" }, block_type: { type: "string" }, content: { type: "object" }, archived: { type: "boolean" }}} },
+  { name: "get-block", description: "Retrieve a Notion block by ID.", inputSchema: {type: "object", properties: { block_id: { type: "string" }}} },
+  { name: "search", description: "Search the user's Notion workspace.", inputSchema: {type: "object", properties: { query: { type: "string" }, filter: { type: "object" }, sort: { type: "object" }, start_cursor: { type: "string" }, page_size: { type: "number" }}} }
+];
+
 const userToolConfig = {
   "default_user_token": {
-    tools: [
-      { name: "notion_search_public", description: "Search public Notion pages.", inputSchema: { type: "object", properties: { query: { type: "string" } } } },
-      { name: "notion_get_page_content", description: "Get content of a specific Notion page by ID.", inputSchema: {type: "object", properties: { page_id: { type: "string" }}} }
-    ]
+    tools: allOriginalNotionTools
   },
   "sjoerd_url_token": {
     tools: [
