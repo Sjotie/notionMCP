@@ -7,6 +7,7 @@ import { z } from "zod";
 import { Client as NotionClient } from "@notionhq/client";
 import dotenv from "dotenv";
 import { AsyncLocalStorage } from "async_hooks";
+import fetch from "node-fetch";
 
 dotenv.config();
 const als = new AsyncLocalStorage();
@@ -16,7 +17,7 @@ const MY_SERVER_NAME = "notion-mcp-url-token";
 const MY_SERVER_VERSION = "1.3.0";
 const MCP_PROTOCOL_VERSION = "2024-11-05"; // Define your supported MCP version
 
-// --- User Token to Notion API Key Mapping (Server-Side Secure Storage) ---
+ // --- User Token to Notion API Key Mapping (Server-Side Secure Storage) ---
 // In a real application, this would come from a secure database or vault,
 // mapping user tokens (from the URL) to their encrypted Notion API keys.
 // For this example, we'll use environment variables based on tokens.
@@ -36,7 +37,20 @@ function getNotionApiKeyForUserToken(userToken) {
 }
 // ----------------------------------------------------------------------
 
-// Stores { transport: SSEServerTransport, notionApiKey: string | null, userToken: string }
+// --- User Token  Fireflies API Token -------------------------------------
+function getFirefliesApiTokenForUserToken(userToken) {
+  if (!userToken) return null;
+  const envVarName = `${userToken.toUpperCase()}_FIREFLIES_API_TOKEN`;
+  const apiToken   = process.env[envVarName];
+  if (apiToken) {
+    console.log(`[${userToken}] Found Fireflies API token in env var: ${envVarName}`);
+    return apiToken;
+  }
+  console.warn(`[${userToken}] No Fireflies API token for token; using default if set.`);
+  return process.env.DEFAULT_FIREFLIES_API_TOKEN || null;
+}
+
+ // Stores { transport: SSEServerTransport, notionApiKey: string | null, firefliesApiToken: string | null, userToken: string }
 const activeClientSessions = new Map(); // Keyed by userToken from URL
 
 const mcpServer = new McpSDKServer({
@@ -139,13 +153,38 @@ const allOriginalNotionTools = [
   { name: "search", description: "Search the user's Notion workspace.", inputSchema: {type: "object", properties: { query: { type: "string" }, filter: { type: "object" }, sort: { type: "object" }, start_cursor: { type: "string" }, page_size: { type: "number" }}} }
 ];
 
+const firefliesTools = [
+  {
+    name: "fireflies_list_transcripts",
+    description: "List Fireflies transcripts (id, title, date, participants).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "number", description: "Max results (default 20)" }
+      }
+    }
+  },
+  {
+    name: "fireflies_get_transcript",
+    description: "Get sentences + speaker info for a Fireflies transcript ID.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        transcript_id: { type: "string", description: "Fireflies transcript ID" }
+      },
+      required: ["transcript_id"]
+    }
+  }
+];
+
 const userToolConfig = {
   "default_user_token": {
-    tools: allOriginalNotionTools
+    tools: [...allOriginalNotionTools, ...firefliesTools]
   },
   "sjoerd_url_token": {
     tools: [
       ...allOriginalNotionTools,
+      ...firefliesTools,
       // { name: "notion_search_sjoerd_databases", description: "Search within Sjoerd's specific databases.", inputSchema: { type: "object", properties: { query: { type: "string" } } } },
       // { name: "notion_create_sjoerd_task", description: "Create a new task in Sjoerd's task database.", inputSchema: {type: "object", properties: { title: {type: "string"} }} },
       // { name: "notion_get_page_content", description: "Get content of a specific Notion page by ID.", inputSchema: {type: "object", properties: { page_id: { type: "string" }}} }
@@ -154,6 +193,7 @@ const userToolConfig = {
   "wouter_url_token": {
     tools: [
       ...allOriginalNotionTools,
+      ...firefliesTools,
       // { name: "notion_query_wouter_projects", description: "Query Wouter's project database.", inputSchema: { type: "object", properties: { status: { type: "string", enum: ["active", "pending"] } } } },
       // { name: "notion_get_page_content", description: "Get content of a specific Notion page by ID.", inputSchema: {type: "object", properties: { page_id: { type: "string" }}} }
     ]
@@ -161,6 +201,7 @@ const userToolConfig = {
   "leonie_url_token": {
     tools: [
       ...allOriginalNotionTools,
+      ...firefliesTools,
       // { name: "notion_leonie_custom_tool", description: "Leonie's custom test tool.", inputSchema: { type: "object", properties: { foo: { type: "string" } } } }
     ]
   }
@@ -203,14 +244,26 @@ mcpServer.setRequestHandler(z.object({
     return { isError: true, content: [{ type: "text", text: "Internal Server Error: User token context lost." }] };
   }
 
-  const sessionData = activeClientSessions.get(userToken);
-  if (!sessionData || !sessionData.notionApiKey) {
-    console.error(`[${userToken}] Tool '${name}': No Notion API Key found for this user token in session or default.`);
-    return { isError: true, content: [{ type: "text", text: `Authorization Error: Notion API Key not configured for your session token.` }] };
-  }
+  // Figure out whether the requested tool is a Notion tool
+  const notionToolPrefixes = [
+    "list-databases", "query-database", "create-page", "update-page",
+    "create-database", "update-database", "get-page", "get-block",
+    "get-block-children", "append-block-children", "update-block", "search",
+    "notion_"
+  ];
+  const isNotionTool = notionToolPrefixes.some(p => name.startsWith(p));
 
-  const notionForUser = new NotionClient({ auth: sessionData.notionApiKey });
-  console.log(`${logPrefix} Using API Key ending '...${sessionData.notionApiKey.slice(-4)}'.`);
+  const sessionData = activeClientSessions.get(userToken);
+  let notionForUser = null;
+
+  if (isNotionTool) {
+    if (!sessionData || !sessionData.notionApiKey) {
+      console.error(`[${userToken}] Tool '${name}': Notion API key missing.`);
+      return { isError: true, content: [{ type: "text", text: "Authorization Error: Notion API Key missing." }] };
+    }
+    notionForUser = new NotionClient({ auth: sessionData.notionApiKey });
+    console.log(`${logPrefix} Using Notion key ending ${sessionData.notionApiKey.slice(-4)}.`);
+  }
 
   // Helper function to format and truncate tool output
   function formatToolOutput(responseData, currentToolName) {
@@ -405,6 +458,77 @@ mcpServer.setRequestHandler(z.object({
       return formatToolOutput(response, name);
     }
 
+    /* ---------- FIREFLIES TOOLS ---------- */
+    else if (name === "fireflies_list_transcripts") {
+      if (!sessionData || !sessionData.firefliesApiToken) {
+        return { isError: true, content: [{ type: "text", text: "Authorization Error: Fireflies API Token not configured for your session token." }] };
+      }
+      const ffToken = sessionData.firefliesApiToken;
+      const limit   = (args && args.limit) ? args.limit : 20;
+
+      const gql = `
+        query ListTranscripts($limit:Int){
+          transcripts(limit:$limit){
+            id title dateString participants
+          }
+        }`;
+      const body = JSON.stringify({ query: gql, variables: { limit } });
+
+      try {
+        const resp = await fetch("https://api.fireflies.ai/graphql", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${ffToken}`
+          },
+          body
+        });
+        const json = await resp.json();
+        if (json.errors) throw new Error(json.errors[0].message);
+        return formatToolOutput(json.data.transcripts, name);
+      } catch (e) {
+        console.error(`${logPrefix} Fireflies error:`, e);
+        return { isError: true, content: [{ type: "text", text: `Fireflies API Error: ${e.message}` }] };
+      }
+    }
+    else if (name === "fireflies_get_transcript") {
+      if (!sessionData || !sessionData.firefliesApiToken) {
+        return { isError: true, content: [{ type: "text", text: "Authorization Error: Fireflies API Token not configured for your session token." }] };
+      }
+      const ffToken = sessionData.firefliesApiToken;
+      const { transcript_id } = args || {};
+      if (!transcript_id) {
+        return { isError: true, content: [{ type: "text", text: "Error: transcript_id is required." }] };
+      }
+
+      const gql = `
+        query TranscriptDetails($id:String!){
+          transcript(id:$id){
+            id title
+            sentences{index speaker_name speaker_id text}
+          }
+        }`;
+      const body = JSON.stringify({ query: gql, variables: { id: transcript_id } });
+
+      try {
+        const resp  = await fetch("https://api.fireflies.ai/graphql", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${ffToken}`
+          },
+          body
+        });
+        const json = await resp.json();
+        if (json.errors) throw new Error(json.errors[0].message);
+        return formatToolOutput(json.data.transcript, name);
+      } catch (e) {
+        console.error(`${logPrefix} Fireflies error:`, e);
+        return { isError: true, content: [{ type: "text", text: `Fireflies API Error: ${e.message}` }] };
+      }
+    }
+    /* ---------- END FIREFLIES TOOLS ---------- */
+
     // Fallback for unknown tool
     console.error(`${logPrefix} Unknown tool or tool not available for this user.`);
     return { isError: true, content: [{ type: "text", text: `Tool '${name}' not found or not available for your current user context.` }] };
@@ -427,6 +551,7 @@ app.get("/mcp/:userToken", (req, res) => {
   console.error(`[${userToken}] GET /mcp/${userToken}: New client connection.`);
 
   const userNotionApiKey = getNotionApiKeyForUserToken(userToken);
+  const userFirefliesApiToken = getFirefliesApiTokenForUserToken(userToken);
   if (!userNotionApiKey) {
     console.error(`[${userToken}] Unauthorized: No Notion API Key configured for this token.`);
     return res.status(403).json({ error: "Forbidden: Invalid user token or API key not configured." });
@@ -442,6 +567,7 @@ app.get("/mcp/:userToken", (req, res) => {
   activeClientSessions.set(userToken, {
     transport: clientTransport,
     notionApiKey: userNotionApiKey, // Store the resolved API key
+    firefliesApiToken: userFirefliesApiToken,
     userToken: userToken
   });
   console.error(`[${userToken}] Session created with Notion API key. Total active: ${activeClientSessions.size}`);
