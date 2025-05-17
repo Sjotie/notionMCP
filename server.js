@@ -7,7 +7,7 @@ import { z } from "zod";
 import { Client as NotionClient } from "@notionhq/client";
 import dotenv from "dotenv";
 import { AsyncLocalStorage } from "async_hooks";
-import fetch from "node-fetch";
+import fetch from "node-fetch"; // v2 import style for CommonJS compatibility
 
 dotenv.config();
 const als = new AsyncLocalStorage();
