@@ -11,9 +11,9 @@ import { AsyncLocalStorage } from "async_hooks";
 dotenv.config();
 const als = new AsyncLocalStorage();
 
-// --- Define server name and version as constants ---
+ // --- Define server name and version as constants ---
 const MY_SERVER_NAME = "notion-mcp-url-token";
-const MY_SERVER_VERSION = "1.2.0";
+const MY_SERVER_VERSION = "1.3.0";
 const MCP_PROTOCOL_VERSION = "2024-11-05"; // Define your supported MCP version
 
 // --- User Token to Notion API Key Mapping (Server-Side Secure Storage) ---
@@ -203,6 +203,33 @@ mcpServer.setRequestHandler(z.object({
   const notionForUser = new NotionClient({ auth: sessionData.notionApiKey });
   console.log(`${logPrefix} Using API Key ending '...${sessionData.notionApiKey.slice(-4)}'.`);
 
+  // Helper function to format and truncate tool output
+  function formatToolOutput(responseData, currentToolName) {
+    const toolLogPrefix = `[${userToken || 'tools/call'}:${currentToolName || 'unknown_tool'}]`;
+    let outputText;
+    try {
+      if (responseData === undefined || responseData === null) {
+        console.warn(`${toolLogPrefix} Response data is undefined or null. Returning empty string content.`);
+        return { content: [{ type: "text", text: "" }] };
+      }
+      outputText = JSON.stringify(responseData, null, 2);
+    } catch (stringifyError) {
+      console.error(`${toolLogPrefix} Error stringifying responseData:`, stringifyError);
+      return { isError: true, content: [{ type: "text", text: "Internal Server Error: Could not serialize tool output." }] };
+    }
+
+    const maxLength = 50000;
+    if (outputText.length > maxLength) {
+      const originalLength = outputText.length;
+      const truncatedText = outputText.substring(0, maxLength);
+      const truncationMessage = `Output was too long: total ${originalLength}. Truncated to 50.000 characters.\n`;
+      console.warn(`${toolLogPrefix} Output truncated. Original length: ${originalLength}, new length: ${maxLength}.`);
+      return { content: [{ type: "text", text: truncationMessage + truncatedText }] };
+    } else {
+      return { content: [{ type: "text", text: outputText }] };
+    }
+  }
+
   try {
     // --- User Sjoerd's Tools ---
     if (userToken === "sjoerd_url_token") {
@@ -213,7 +240,7 @@ mcpServer.setRequestHandler(z.object({
           notionForUser.databases.query({ database_id: dbId, filter: { property: "Name", title: { contains: args.query } } })
         );
         const results = await Promise.all(searchPromises);
-        return { content: [{ type: "text", text: JSON.stringify(results.flat(), null, 2) }] };
+        return formatToolOutput(results.flat(), name);
       }
       if (name === "notion_create_sjoerd_task") {
         const sjoerdsTaskDbId = "sjoerds_task_db_id"; // TODO: Replace with real ID
@@ -221,13 +248,13 @@ mcpServer.setRequestHandler(z.object({
           parent: { database_id: sjoerdsTaskDbId },
           properties: { Title: { title: [{ text: { content: args.title } }] } }
         });
-        return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
+        return formatToolOutput(response, name);
       }
       if (name === "notion_get_page_content") {
         let { page_id } = args || {};
         page_id = page_id.replace(/-/g, "");
         const pageContent = await notionForUser.blocks.children.list({ block_id: page_id });
-        return { content: [{ type: "text", text: JSON.stringify(pageContent.results, null, 2) }] };
+        return formatToolOutput(pageContent.results, name);
       }
     }
 
@@ -239,13 +266,13 @@ mcpServer.setRequestHandler(z.object({
           database_id: woutersProjectDbId,
           filter: { property: "Status", select: { equals: args.status } }
         });
-        return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
+        return formatToolOutput(response, name);
       }
       if (name === "notion_get_page_content") {
         let { page_id } = args || {};
         page_id = page_id.replace(/-/g, "");
         const pageContent = await notionForUser.blocks.children.list({ block_id: page_id });
-        return { content: [{ type: "text", text: JSON.stringify(pageContent.results, null, 2) }] };
+        return formatToolOutput(pageContent.results, name);
       }
     }
 
@@ -253,14 +280,14 @@ mcpServer.setRequestHandler(z.object({
     if (userToken === "leonie_url_token") {
       if (name === "notion_leonie_custom_tool") {
         // Example custom tool for Leonie
-        return { content: [{ type: "text", text: `Leonie's custom tool executed with foo: ${args.foo}` }] };
+        return formatToolOutput(`Leonie's custom tool executed with foo: ${args.foo}`, name);
       }
     }
 
     // --- Standard 12 Notion Tools for all users ---
     if (name === "list-databases") {
       const response = await notionForUser.search({ filter: { property: "object", value: "database" }, page_size: 100, sort: { direction: "descending", timestamp: "last_edited_time" } });
-      return { content: [{ type: "text", text: JSON.stringify(response.results, null, 2) }] };
+      return formatToolOutput(response.results, name);
     }
     else if (name === "query-database") {
       const { database_id, filter, sorts, start_cursor, page_size } = args || {};
@@ -270,21 +297,21 @@ mcpServer.setRequestHandler(z.object({
       const queryParams = { database_id, page_size: page_size || 100, filter, sorts, start_cursor };
       Object.keys(queryParams).forEach(key => queryParams[key] === undefined && delete queryParams[key]);
       const response = await notionForUser.databases.query(queryParams);
-      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
+      return formatToolOutput(response, name);
     }
     else if (name === "create-page") {
       const { parent_id, properties, children } = args || {};
       const pageParams = { parent: { database_id: parent_id }, properties };
       if (children) pageParams.children = children;
       const response = await notionForUser.pages.create(pageParams);
-      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
+      return formatToolOutput(response, name);
     }
     else if (name === "update-page") {
       const { page_id, properties, archived } = args || {};
       const updateParams = { page_id, properties };
       if (archived !== undefined) updateParams.archived = archived;
       const response = await notionForUser.pages.update(updateParams);
-      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
+      return formatToolOutput(response, name);
     }
     else if (name === "create-database") {
       let { parent_id, title, properties, icon, cover } = args || {};
@@ -298,7 +325,7 @@ mcpServer.setRequestHandler(z.object({
       }
       if (cover) databaseParams.cover = cover;
       const response = await notionForUser.databases.create(databaseParams);
-      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
+      return formatToolOutput(response, name);
     }
     else if (name === "update-database") {
       const { database_id, title, description, properties: db_properties } = args || {};
@@ -307,13 +334,13 @@ mcpServer.setRequestHandler(z.object({
       if (description !== undefined) updateParams.description = description;
       if (db_properties !== undefined) updateParams.properties = db_properties;
       const response = await notionForUser.databases.update(updateParams);
-      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
+      return formatToolOutput(response, name);
     }
     else if (name === "get-page" || (name === "notion_get_page_content" && (userToken === "sjoerd_url_token" || userToken === "wouter_url_token" || userToken === "default_user_token"))) {
       let { page_id } = args || {};
       page_id = page_id.replace(/-/g, "");
       const response = await notionForUser.pages.retrieve({ page_id });
-      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
+      return formatToolOutput(response, name);
     }
     else if (name === "get-block-children") {
       let { block_id, start_cursor, page_size } = args || {};
@@ -321,7 +348,7 @@ mcpServer.setRequestHandler(z.object({
       const params = { block_id, page_size: page_size || 100 };
       if (start_cursor) params.start_cursor = start_cursor;
       const response = await notionForUser.blocks.children.list(params);
-      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
+      return formatToolOutput(response, name);
     }
     else if (name === "append-block-children") {
       let { block_id, children, after } = args || {};
@@ -329,7 +356,7 @@ mcpServer.setRequestHandler(z.object({
       const params = { block_id, children };
       if (after) params.after = after.replace(/-/g, "");
       const response = await notionForUser.blocks.children.append(params);
-      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
+      return formatToolOutput(response, name);
     }
     else if (name === "update-block") {
       let { block_id, block_type, content, archived } = args || {};
@@ -337,13 +364,13 @@ mcpServer.setRequestHandler(z.object({
       const updateParams = { block_id, [block_type]: content };
       if (archived !== undefined) updateParams.archived = archived;
       const response = await notionForUser.blocks.update(updateParams);
-      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
+      return formatToolOutput(response, name);
     }
     else if (name === "get-block") {
       let { block_id } = args || {};
       block_id = block_id.replace(/-/g, "");
       const response = await notionForUser.blocks.retrieve({ block_id });
-      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
+      return formatToolOutput(response, name);
     }
     else if (name === "search") {
       const { query, filter, sort, start_cursor, page_size } = args || {};
@@ -352,7 +379,7 @@ mcpServer.setRequestHandler(z.object({
       if (sort) searchParams.sort = sort;
       if (start_cursor) searchParams.start_cursor = start_cursor;
       const response = await notionForUser.search(searchParams);
-      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
+      return formatToolOutput(response, name);
     }
 
     // Fallback for unknown tool
