@@ -137,22 +137,22 @@ const userToolConfig = {
   "sjoerd_url_token": {
     tools: [
       ...allOriginalNotionTools,
-      { name: "notion_search_sjoerd_databases", description: "Search within Sjoerd's specific databases.", inputSchema: { type: "object", properties: { query: { type: "string" } } } },
-      { name: "notion_create_sjoerd_task", description: "Create a new task in Sjoerd's task database.", inputSchema: {type: "object", properties: { title: {type: "string"} }} },
-      { name: "notion_get_page_content", description: "Get content of a specific Notion page by ID.", inputSchema: {type: "object", properties: { page_id: { type: "string" }}} }
+      // { name: "notion_search_sjoerd_databases", description: "Search within Sjoerd's specific databases.", inputSchema: { type: "object", properties: { query: { type: "string" } } } },
+      // { name: "notion_create_sjoerd_task", description: "Create a new task in Sjoerd's task database.", inputSchema: {type: "object", properties: { title: {type: "string"} }} },
+      // { name: "notion_get_page_content", description: "Get content of a specific Notion page by ID.", inputSchema: {type: "object", properties: { page_id: { type: "string" }}} }
     ]
   },
   "wouter_url_token": {
     tools: [
       ...allOriginalNotionTools,
-      { name: "notion_query_wouter_projects", description: "Query Wouter's project database.", inputSchema: { type: "object", properties: { status: { type: "string", enum: ["active", "pending"] } } } },
-      { name: "notion_get_page_content", description: "Get content of a specific Notion page by ID.", inputSchema: {type: "object", properties: { page_id: { type: "string" }}} }
+      // { name: "notion_query_wouter_projects", description: "Query Wouter's project database.", inputSchema: { type: "object", properties: { status: { type: "string", enum: ["active", "pending"] } } } },
+      // { name: "notion_get_page_content", description: "Get content of a specific Notion page by ID.", inputSchema: {type: "object", properties: { page_id: { type: "string" }}} }
     ]
   },
   "leonie_url_token": {
     tools: [
       ...allOriginalNotionTools,
-      { name: "notion_leonie_custom_tool", description: "Leonie's custom test tool.", inputSchema: { type: "object", properties: { foo: { type: "string" } } } }
+      // { name: "notion_leonie_custom_tool", description: "Leonie's custom test tool.", inputSchema: { type: "object", properties: { foo: { type: "string" } } } }
     ]
   }
   // Add other users as needed
@@ -232,57 +232,57 @@ mcpServer.setRequestHandler(z.object({
 
   try {
     // --- User Sjoerd's Tools ---
-    if (userToken === "sjoerd_url_token") {
-      if (name === "notion_search_sjoerd_databases") {
-        // Example: Sjoerd has a specific set of database IDs to search
-        const sjoerdsDatabaseIds = ["db_id_1", "db_id_2"]; // TODO: Replace with real IDs
-        const searchPromises = sjoerdsDatabaseIds.map(dbId =>
-          notionForUser.databases.query({ database_id: dbId, filter: { property: "Name", title: { contains: args.query } } })
-        );
-        const results = await Promise.all(searchPromises);
-        return formatToolOutput(results.flat(), name);
-      }
-      if (name === "notion_create_sjoerd_task") {
-        const sjoerdsTaskDbId = "sjoerds_task_db_id"; // TODO: Replace with real ID
-        const response = await notionForUser.pages.create({
-          parent: { database_id: sjoerdsTaskDbId },
-          properties: { Title: { title: [{ text: { content: args.title } }] } }
-        });
-        return formatToolOutput(response, name);
-      }
-      if (name === "notion_get_page_content") {
-        let { page_id } = args || {};
-        page_id = page_id.replace(/-/g, "");
-        const pageContent = await notionForUser.blocks.children.list({ block_id: page_id });
-        return formatToolOutput(pageContent.results, name);
-      }
-    }
+    // if (userToken === "sjoerd_url_token") {
+    //   if (name === "notion_search_sjoerd_databases") {
+    //     // Example: Sjoerd has a specific set of database IDs to search
+    //     const sjoerdsDatabaseIds = ["db_id_1", "db_id_2"]; // TODO: Replace with real IDs
+    //     const searchPromises = sjoerdsDatabaseIds.map(dbId =>
+    //       notionForUser.databases.query({ database_id: dbId, filter: { property: "Name", title: { contains: args.query } } })
+    //     );
+    //     const results = await Promise.all(searchPromises);
+    //     return formatToolOutput(results.flat(), name);
+    //   }
+    //   if (name === "notion_create_sjoerd_task") {
+    //     const sjoerdsTaskDbId = "sjoerds_task_db_id"; // TODO: Replace with real ID
+    //     const response = await notionForUser.pages.create({
+    //       parent: { database_id: sjoerdsTaskDbId },
+    //       properties: { Title: { title: [{ text: { content: args.title } }] } }
+    //     });
+    //     return formatToolOutput(response, name);
+    //   }
+    //   if (name === "notion_get_page_content") {
+    //     let { page_id } = args || {};
+    //     page_id = page_id.replace(/-/g, "");
+    //     const pageContent = await notionForUser.blocks.children.list({ block_id: page_id });
+    //     return formatToolOutput(pageContent.results, name);
+    //   }
+    // }
 
     // --- User Wouter's Tools ---
-    if (userToken === "wouter_url_token") {
-      if (name === "notion_query_wouter_projects") {
-        const woutersProjectDbId = "wouters_project_db_id"; // TODO: Replace with real ID
-        const response = await notionForUser.databases.query({
-          database_id: woutersProjectDbId,
-          filter: { property: "Status", select: { equals: args.status } }
-        });
-        return formatToolOutput(response, name);
-      }
-      if (name === "notion_get_page_content") {
-        let { page_id } = args || {};
-        page_id = page_id.replace(/-/g, "");
-        const pageContent = await notionForUser.blocks.children.list({ block_id: page_id });
-        return formatToolOutput(pageContent.results, name);
-      }
-    }
+    // if (userToken === "wouter_url_token") {
+    //   if (name === "notion_query_wouter_projects") {
+    //     const woutersProjectDbId = "wouters_project_db_id"; // TODO: Replace with real ID
+    //     const response = await notionForUser.databases.query({
+    //       database_id: woutersProjectDbId,
+    //       filter: { property: "Status", select: { equals: args.status } }
+    //     });
+    //     return formatToolOutput(response, name);
+    //   }
+    //   if (name === "notion_get_page_content") {
+    //     let { page_id } = args || {};
+    //     page_id = page_id.replace(/-/g, "");
+    //     const pageContent = await notionForUser.blocks.children.list({ block_id: page_id });
+    //     return formatToolOutput(pageContent.results, name);
+    //   }
+    // }
 
     // --- User Leonie's Tools ---
-    if (userToken === "leonie_url_token") {
-      if (name === "notion_leonie_custom_tool") {
-        // Example custom tool for Leonie
-        return formatToolOutput(`Leonie's custom tool executed with foo: ${args.foo}`, name);
-      }
-    }
+    // if (userToken === "leonie_url_token") {
+    //   if (name === "notion_leonie_custom_tool") {
+    //     // Example custom tool for Leonie
+    //     return formatToolOutput(`Leonie's custom tool executed with foo: ${args.foo}`, name);
+    //   }
+    // }
 
     // --- Standard 12 Notion Tools for all users ---
     if (name === "list-databases") {
