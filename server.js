@@ -116,7 +116,16 @@ mcpServer.setRequestHandler(
 );
 
 const allOriginalNotionTools = [
-  { name: "list-databases", description: "List all databases in the user's Notion workspace.", inputSchema: {type: "object", properties: {}} },
+  { 
+    name: "list-databases", 
+    description: "List all databases in the user's Notion workspace.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        concise: { type: "boolean", description: "If true, return a concise summary for each database. If false or omitted, return full details." }
+      }
+    }
+  },
   { name: "query-database", description: "Query a Notion database by ID.", inputSchema: {type: "object", properties: { database_id: { type: "string" }, filter: { type: "object" }, sorts: { type: "array" }, start_cursor: { type: "string" }, page_size: { type: "number" }}} },
   { name: "create-page", description: "Create a new page in a Notion database.", inputSchema: {type: "object", properties: { parent_id: { type: "string" }, properties: { type: "object" }, children: { type: "array" }}} },
   { name: "update-page", description: "Update a Notion page by ID.", inputSchema: {type: "object", properties: { page_id: { type: "string" }, properties: { type: "object" }, archived: { type: "boolean" }}} },
@@ -286,8 +295,22 @@ mcpServer.setRequestHandler(z.object({
 
     // --- Standard 12 Notion Tools for all users ---
     if (name === "list-databases") {
+      const concise = args && typeof args.concise === "boolean" ? args.concise : false;
       const response = await notionForUser.search({ filter: { property: "object", value: "database" }, page_size: 100, sort: { direction: "descending", timestamp: "last_edited_time" } });
-      return formatToolOutput(response.results, name);
+      if (concise) {
+        // Only return id, title, and created_time/last_edited_time for each database
+        const conciseResults = response.results.map(db => ({
+          id: db.id,
+          title: db.title && Array.isArray(db.title) && db.title.length > 0
+            ? (db.title[0].plain_text || db.title[0].text?.content || "")
+            : "",
+          created_time: db.created_time,
+          last_edited_time: db.last_edited_time
+        }));
+        return formatToolOutput(conciseResults, name);
+      } else {
+        return formatToolOutput(response.results, name);
+      }
     }
     else if (name === "query-database") {
       const { database_id, filter, sorts, start_cursor, page_size } = args || {};
