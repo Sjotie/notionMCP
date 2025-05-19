@@ -506,6 +506,7 @@ mcpServer.setRequestHandler(z.object({
           transcript(id:$id){
             id title
             sentences{index speaker_name speaker_id text}
+            speakers{id name}
           }
         }`;
       const body = JSON.stringify({ query: gql, variables: { id: transcript_id } });
@@ -521,7 +522,34 @@ mcpServer.setRequestHandler(z.object({
         });
         const json = await resp.json();
         if (json.errors) throw new Error(json.errors[0].message);
-        return formatToolOutput(json.data.transcript, name);
+
+        const originalTranscriptData = json.data.transcript;
+        if (!originalTranscriptData) {
+          return formatToolOutput({ message: "Transcript not found or empty." }, name);
+        }
+
+        const speakersMap = {};
+        if (originalTranscriptData.speakers && Array.isArray(originalTranscriptData.speakers)) {
+          originalTranscriptData.speakers.forEach(speaker => {
+            if (speaker && speaker.id && speaker.name) {
+              speakersMap[speaker.id] = speaker.name;
+            }
+          });
+        }
+
+        const leanSentences = originalTranscriptData.sentences ? originalTranscriptData.sentences.map(sentence => ([
+          sentence.speaker_id,
+          sentence.text
+        ])) : [];
+
+        const optimizedResponse = {
+          title: originalTranscriptData.title,
+          id: originalTranscriptData.id,
+          speakers_map: speakersMap,
+          sentences: leanSentences
+        };
+
+        return formatToolOutput(optimizedResponse, name);
       } catch (e) {
         console.error(`${logPrefix} Fireflies error:`, e);
         return { isError: true, content: [{ type: "text", text: `Fireflies API Error: ${e.message}` }] };
