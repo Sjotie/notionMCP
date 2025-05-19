@@ -156,11 +156,17 @@ const allOriginalNotionTools = [
 const firefliesTools = [
   {
     name: "fireflies_list_transcripts",
-    description: "List Fireflies transcripts (id, title, date, participants).",
+    description: "List Fireflies transcripts with optional filters for date range, participants, and pagination.",
     inputSchema: {
       type: "object",
       properties: {
-        limit: { type: "number", description: "Max results (default 20)" }
+        limit: { type: "number", description: "Max results (default 20, max 50)" },
+        skip: { type: "number", description: "Number of transcripts to skip (for pagination)" },
+        fromDate: { type: "string", format: "date-time", description: "Include transcripts created after this ISO 8601 datetime (e.g., YYYY-MM-DDTHH:mm:ssZ)" },
+        toDate: { type: "string", format: "date-time", description: "Include transcripts created before this ISO 8601 datetime (e.g., YYYY-MM-DDTHH:mm:ssZ)" },
+        participantEmail: { type: "string", description: "Filter by participant's email address" },
+        organizerEmail: { type: "string", description: "Filter by organizer's email address" },
+        isMine: { type: "boolean", description: "Filter for transcripts organized by the API key owner" }
       }
     }
   },
@@ -464,15 +470,59 @@ mcpServer.setRequestHandler(z.object({
         return { isError: true, content: [{ type: "text", text: "Authorization Error: Fireflies API Token not configured for your session token." }] };
       }
       const ffToken = sessionData.firefliesApiToken;
-      const limit   = (args && args.limit) ? args.limit : 20;
+      
+      // Extract new parameters from args, providing defaults or undefined where appropriate
+      const {
+        limit = 20,
+        skip,
+        fromDate,
+        toDate,
+        participantEmail,
+        organizerEmail,
+        isMine
+      } = args || {};
+
+      // Construct the variables object for the GraphQL query
+      const gqlVariables = { limit: parseInt(limit, 10) > 50 ? 50 : parseInt(limit, 10) };
+      if (skip !== undefined) gqlVariables.skip = parseInt(skip, 10);
+      if (fromDate) gqlVariables.fromDate = fromDate;
+      if (toDate) gqlVariables.toDate = toDate;
+      if (participantEmail) gqlVariables.participantEmail = participantEmail;
+      if (organizerEmail) gqlVariables.organizerEmail = organizerEmail;
+      if (typeof isMine === 'boolean') gqlVariables.mine = isMine;
+
+      // Build the GraphQL query string dynamically based on provided variables
+      let variableDefinitions = "$limit: Int";
+      if (gqlVariables.skip !== undefined) variableDefinitions += ", $skip: Int";
+      if (gqlVariables.fromDate) variableDefinitions += ", $fromDate: DateTime";
+      if (gqlVariables.toDate) variableDefinitions += ", $toDate: DateTime";
+      if (gqlVariables.participantEmail) variableDefinitions += ", $participantEmail: String";
+      if (gqlVariables.organizerEmail) variableDefinitions += ", $organizerEmail: String";
+      if (gqlVariables.mine !== undefined) variableDefinitions += ", $mine: Boolean";
+      
+      let queryArguments = "limit: $limit";
+      if (gqlVariables.skip !== undefined) queryArguments += ", skip: $skip";
+      if (gqlVariables.fromDate) queryArguments += ", fromDate: $fromDate";
+      if (gqlVariables.toDate) queryArguments += ", toDate: $toDate";
+      if (gqlVariables.participantEmail) queryArguments += ", participant_email: $participantEmail";
+      if (gqlVariables.organizerEmail) queryArguments += ", organizer_email: $organizerEmail";
+      if (gqlVariables.mine !== undefined) queryArguments += ", mine: $mine";
 
       const gql = `
-        query ListTranscripts($limit:Int){
-          transcripts(limit:$limit){
-            id title dateString participants
+        query ListTranscripts(${variableDefinitions}) {
+          transcripts(${queryArguments}) {
+            id
+            title
+            dateString
+            participants
+            organizer_email
           }
         }`;
-      const body = JSON.stringify({ query: gql, variables: { limit } });
+      
+      const body = JSON.stringify({ query: gql, variables: gqlVariables });
+
+      console.log(`${logPrefix} Fireflies 'list_transcripts' GQL Query: ${gql}`);
+      console.log(`${logPrefix} Fireflies 'list_transcripts' GQL Variables:`, JSON.stringify(gqlVariables, null, 2));
 
       try {
         const resp = await fetch("https://api.fireflies.ai/graphql", {
@@ -484,7 +534,10 @@ mcpServer.setRequestHandler(z.object({
           body
         });
         const json = await resp.json();
-        if (json.errors) throw new Error(json.errors[0].message);
+        if (json.errors) {
+          console.error(`${logPrefix} Fireflies GQL Errors:`, json.errors);
+          throw new Error(json.errors.map(e => e.message).join("; "));
+        }
         return formatToolOutput(json.data.transcripts, name);
       } catch (e) {
         console.error(`${logPrefix} Fireflies error:`, e);
