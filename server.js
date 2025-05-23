@@ -633,9 +633,9 @@ app.get("/mcp/:userToken", (req, res) => {
 
   const userNotionApiKey = getNotionApiKeyForUserToken(userToken);
   const userFirefliesApiToken = getFirefliesApiTokenForUserToken(userToken);
-  if (!userNotionApiKey) {
-    console.error(`[${userToken}] Unauthorized: No Notion API Key configured for this token.`);
-    return res.status(403).json({ error: "Forbidden: Invalid user token or API key not configured." });
+  if (!userNotionApiKey && !userFirefliesApiToken) {
+    console.error(`[${userToken}] Unauthorized: No API keys (Notion or Fireflies) configured for this token.`);
+    return res.status(403).json({ error: "Forbidden: Invalid user token or no API keys configured." });
   }
 
   // For SSEServerTransport, the `messagesPath` is where the client should POST.
