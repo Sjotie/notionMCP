@@ -677,7 +677,7 @@ mcpServer.setRequestHandler(z.object({
 
         // Initialize Gemini
         const genAI = new GoogleGenerativeAI(geminiApiKey);
-        const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-preview-05-20" });
+        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-preview-05-20" });
 
         // Create the prompt for Gemini
         const systemPrompt = `You are tasked with answering questions or providing answers based ONLY on the following transcript and nothing else. Be complete, if in doubt, provide more information than was asked for.
