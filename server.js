@@ -8,6 +8,7 @@ import { Client as NotionClient } from "@notionhq/client";
 import dotenv from "dotenv";
 import { AsyncLocalStorage } from "async_hooks";
 import fetch from "node-fetch"; // v2 import style for CommonJS compatibility
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 dotenv.config();
 const als = new AsyncLocalStorage();
@@ -179,6 +180,18 @@ const firefliesTools = [
         transcript_id: { type: "string", description: "Fireflies transcript ID" }
       },
       required: ["transcript_id"]
+    }
+  },
+  {
+    name: "fireflies_analyze_transcript",
+    description: "Fetch a Fireflies transcript and analyze it using AI to answer specific questions. Use this when you need to extract specific information from a long transcript instead of receiving the full text.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        transcript_id: { type: "string", description: "Fireflies transcript ID" },
+        prompt: { type: "string", description: "The question or analysis request about the transcript content" }
+      },
+      required: ["transcript_id", "prompt"]
     }
   }
 ];
@@ -606,6 +619,92 @@ mcpServer.setRequestHandler(z.object({
       } catch (e) {
         console.error(`${logPrefix} Fireflies error:`, e);
         return { isError: true, content: [{ type: "text", text: `Fireflies API Error: ${e.message}` }] };
+      }
+    }
+    else if (name === "fireflies_analyze_transcript") {
+      if (!sessionData || !sessionData.firefliesApiToken) {
+        return { isError: true, content: [{ type: "text", text: "Authorization Error: Fireflies API Token not configured for your session token." }] };
+      }
+      
+      const geminiApiKey = process.env.GEMINI_API_KEY;
+      if (!geminiApiKey) {
+        return { isError: true, content: [{ type: "text", text: "Configuration Error: GEMINI_API_KEY not found in environment variables." }] };
+      }
+      
+      const ffToken = sessionData.firefliesApiToken;
+      const { transcript_id, prompt } = args || {};
+      
+      if (!transcript_id || !prompt) {
+        return { isError: true, content: [{ type: "text", text: "Error: Both transcript_id and prompt are required." }] };
+      }
+
+      try {
+        // First, fetch the full transcript
+        const gql = `
+          query TranscriptDetails($id:String!){
+            transcript(id:$id){
+              id title
+              sentences{speaker_name text}
+              speakers{name}
+            }
+          }`;
+        const body = JSON.stringify({ query: gql, variables: { id: transcript_id } });
+
+        const resp = await fetch("https://api.fireflies.ai/graphql", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${ffToken}`
+          },
+          body
+        });
+        
+        const json = await resp.json();
+        if (json.errors) throw new Error(json.errors[0].message);
+
+        const transcriptData = json.data.transcript;
+        if (!transcriptData) {
+          return { isError: true, content: [{ type: "text", text: "Transcript not found or empty." }] };
+        }
+
+        // Format the transcript for Gemini
+        let formattedTranscript = `Title: ${transcriptData.title}\n\n`;
+        if (transcriptData.sentences && transcriptData.sentences.length > 0) {
+          transcriptData.sentences.forEach(sentence => {
+            formattedTranscript += `${sentence.speaker_name}: ${sentence.text}\n`;
+          });
+        }
+
+        // Initialize Gemini
+        const genAI = new GoogleGenerativeAI(geminiApiKey);
+        const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-preview-05-20" });
+
+        // Create the prompt for Gemini
+        const systemPrompt = `You are tasked with answering questions or providing answers based ONLY on the following transcript and nothing else. Be complete, if in doubt, provide more information than was asked for.
+
+<transcript>
+${formattedTranscript}
+</transcript>
+
+User question: ${prompt}`;
+
+        console.log(`${logPrefix} Analyzing transcript ${transcript_id} with Gemini`);
+        
+        // Generate response using Gemini
+        const result = await model.generateContent(systemPrompt);
+        const response = await result.response;
+        const analysisText = response.text();
+
+        return formatToolOutput({
+          transcript_id: transcript_id,
+          transcript_title: transcriptData.title,
+          user_prompt: prompt,
+          analysis: analysisText
+        }, name);
+
+      } catch (e) {
+        console.error(`${logPrefix} Error analyzing transcript:`, e);
+        return { isError: true, content: [{ type: "text", text: `Error analyzing transcript: ${e.message}` }] };
       }
     }
     /* ---------- END FIREFLIES TOOLS ---------- */

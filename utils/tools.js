@@ -1,4 +1,5 @@
 import fetch from 'node-fetch';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 export function formatToolOutput(responseData, currentToolName, userToken) {
   const toolLogPrefix = `[${userToken || 'tools/call'}:${currentToolName || 'unknown_tool'}]`;
@@ -274,6 +275,91 @@ export async function handleToolCall(name, args, notionClient, firefliesToken, u
       };
 
       return formatToolOutput(optimizedResponse, name, userToken);
+    }
+    else if (name === "fireflies_analyze_transcript") {
+      if (!firefliesToken) {
+        return { isError: true, content: [{ type: "text", text: "Authorization Error: Fireflies API Token not configured for your session token." }] };
+      }
+      
+      const geminiApiKey = process.env.GEMINI_API_KEY;
+      if (!geminiApiKey) {
+        return { isError: true, content: [{ type: "text", text: "Configuration Error: GEMINI_API_KEY not found in environment variables." }] };
+      }
+      
+      const { transcript_id, prompt } = args || {};
+      
+      if (!transcript_id || !prompt) {
+        return { isError: true, content: [{ type: "text", text: "Error: Both transcript_id and prompt are required." }] };
+      }
+
+      try {
+        // First, fetch the full transcript
+        const gql = `
+          query TranscriptDetails($id:String!){
+            transcript(id:$id){
+              id title
+              sentences{speaker_name text}
+              speakers{name}
+            }
+          }`;
+        const body = JSON.stringify({ query: gql, variables: { id: transcript_id } });
+
+        const resp = await fetch("https://api.fireflies.ai/graphql", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${firefliesToken}`
+          },
+          body
+        });
+        
+        const json = await resp.json();
+        if (json.errors) throw new Error(json.errors[0].message);
+
+        const transcriptData = json.data.transcript;
+        if (!transcriptData) {
+          return { isError: true, content: [{ type: "text", text: "Transcript not found or empty." }] };
+        }
+
+        // Format the transcript for Gemini
+        let formattedTranscript = `Title: ${transcriptData.title}\n\n`;
+        if (transcriptData.sentences && transcriptData.sentences.length > 0) {
+          transcriptData.sentences.forEach(sentence => {
+            formattedTranscript += `${sentence.speaker_name}: ${sentence.text}\n`;
+          });
+        }
+
+        // Initialize Gemini
+        const genAI = new GoogleGenerativeAI(geminiApiKey);
+        const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-preview-05-20" });
+
+        // Create the prompt for Gemini
+        const systemPrompt = `You are tasked with answering questions or providing answers based ONLY on the following transcript and nothing else. Be complete, if in doubt, provide more information than was asked for.
+
+<transcript>
+${formattedTranscript}
+</transcript>
+
+User question: ${prompt}`;
+
+        console.log(`${logPrefix} Analyzing transcript ${transcript_id} with Gemini`);
+        
+        // Generate response using Gemini
+        const result = await model.generateContent(systemPrompt);
+        const response = await result.response;
+        const analysisText = response.text();
+
+        return formatToolOutput({
+          transcript_id: transcript_id,
+          transcript_title: transcriptData.title,
+          user_prompt: prompt,
+          analysis: analysisText
+        }, name, userToken);
+
+      } catch (e) {
+        console.error(`${logPrefix} Error analyzing transcript:`, e);
+        return { isError: true, content: [{ type: "text", text: `Error analyzing transcript: ${e.message}` }] };
+      }
     }
     
     // Unknown tool

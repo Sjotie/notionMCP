@@ -119,7 +119,9 @@ For security, Notion requires you to explicitly grant access to each page or dat
            "C:\\path\\to\\notion-mcp-server\\server.js"
          ],
          "env": {
-           "NOTION_API_KEY": "your_notion_api_key_here"
+           "NOTION_API_KEY": "your_notion_api_key_here",
+           "FIREFLIES_API_TOKEN": "your_fireflies_token_here",
+           "GEMINI_API_KEY": "your_gemini_api_key_here"
          }
        }
      }
@@ -145,6 +147,7 @@ For security, Notion requires you to explicitly grant access to each page or dat
 
 The server provides these tools to AI assistants:
 
+### Notion Tools
 - **list-databases**: View all accessible databases
 - **query-database**: Get entries from a database
 - **create-page**: Add a new page to a database
@@ -157,6 +160,30 @@ The server provides these tools to AI assistants:
 - **update-block**: Edit content blocks
 - **get-block**: View a specific block
 - **search**: Find content across your workspace
+
+### Fireflies Tools
+- **fireflies_list_transcripts**: List meeting transcripts with filtering options
+- **fireflies_get_transcript**: Retrieve the full content of a specific transcript
+- **fireflies_analyze_transcript**: Analyze a transcript with AI to answer specific questions
+
+## Fireflies Integration
+
+This server also supports Fireflies.ai integration for meeting transcript analysis.
+
+### Setting up Fireflies
+1. Get your Fireflies API token from [https://app.fireflies.ai/settings/developer](https://app.fireflies.ai/settings/developer)
+2. Add it to your environment configuration (see setup instructions)
+
+### Gemini AI for Transcript Analysis
+The `fireflies_analyze_transcript` tool uses Google's Gemini AI to analyze long transcripts and answer specific questions about them.
+
+To use this feature:
+1. Get a Gemini API key from [https://makersuite.google.com/app/apikey](https://makersuite.google.com/app/apikey)
+2. Add `GEMINI_API_KEY=your_gemini_key_here` to your environment configuration
+
+Example usage:
+- "Analyze transcript t123 and tell me what action items were discussed"
+- "From transcript t456, summarize the key decisions made"
 
 ## Troubleshooting
 
